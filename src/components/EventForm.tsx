@@ -18,17 +18,50 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog";
+
 import dynamic from 'next/dynamic';
 
 const CampusSquareImport = dynamic(() => import('@/components/CampusSquareImport'), { ssr: false });
 
-
 export function EventForm() {
     const router = useRouter();
-    const [step, setStep] = React.useState(1);
+    const [isModalOpen, setIsModalOpen] = React.useState(false);
     const [title, setTitle] = React.useState("");
     const [description, setDescription] = React.useState("");
     const [selectedPeriods, setSelectedPeriods] = React.useState<string[]>([]);
+    const [showRestoreDialog, setShowRestoreDialog] = React.useState(false);
+    const DRAFT_KEY = "chouseikun_draft_periods";
+
+    React.useEffect(() => {
+        const savedDraft = localStorage.getItem(DRAFT_KEY);
+        if (savedDraft) {
+            try {
+                const parsed = JSON.parse(savedDraft);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    setShowRestoreDialog(true);
+                }
+            } catch (e) {
+                console.error("Failed to parse draft", e);
+            }
+        }
+    }, []);
+
+    React.useEffect(() => {
+        if (selectedPeriods.length > 0) {
+            localStorage.setItem(DRAFT_KEY, JSON.stringify(selectedPeriods));
+        }
+    }, [selectedPeriods]);
+
+    React.useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (selectedPeriods.length > 0 || title.length > 0) {
+                e.preventDefault();
+                e.returnValue = "";
+            }
+        };
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    }, [selectedPeriods, title]);
     const [universityBusyPeriods, setUniversityBusyPeriods] = React.useState<string[]>([]);
     const [googleData, setGoogleData] = React.useState<{ calendars: any[], events: any[] } | null>(null);
     const [selectedCalendarIds, setSelectedCalendarIds] = React.useState<string[]>([]);
@@ -193,6 +226,8 @@ export function EventForm() {
 
             const data = await response.json() as { id: string };
             setCreatedEventId(data.id);
+            localStorage.removeItem(DRAFT_KEY);
+            setIsModalOpen(false);
             // router.push(`/${data.id}`); // Removed to show success UI
         } catch (error) {
             console.error(error);
@@ -283,147 +318,143 @@ export function EventForm() {
     }
 
     return (
-        <div className="w-full max-w-none mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="mb-8 flex justify-between items-start">
-                <div className="text-center sm:text-left">
-                    <h2 className="text-3xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
-                        {siteConfig.ui.createEvent.title}
-                    </h2>
-                    <p className="text-muted-foreground mt-2">
-                        {siteConfig.ui.createEvent.description}
-                    </p>
+        <div className="w-full max-w-none mx-auto h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="mb-2 sm:mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0 gap-4">
+                <div className="text-left flex items-center gap-4">
+                    <div>
+                        <h2 className="text-lg sm:text-xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+                            {siteConfig.ui.createEvent.title}
+                        </h2>
+                        <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+                            {siteConfig.ui.createEvent.description}
+                        </p>
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <Button
+                        type="button"
+                        onClick={() => setIsModalOpen(true)}
+                        disabled={selectedPeriods.length === 0}
+                        size="sm"
+                        className="shadow-sm"
+                    >
+                        次へ (詳細を設定) <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
                 </div>
             </div>
 
-            {/* Stepper Indicator */}
-            <div className="mb-8 flex items-center justify-center sm:justify-start gap-4 text-sm font-medium">
-                <div className={`flex items-center gap-2 ${step >= 1 ? 'text-primary' : 'text-muted-foreground'}`}>
-                    <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs ${step >= 1 ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>1</div>
-                    タイトルと説明の入力
+            <div className="flex-1 min-h-0 relative overflow-hidden w-full flex flex-col">
+                <div className="space-y-2 shrink-0 pb-2 top-0 bg-background/95 backdrop-blur z-10">
+                    <div className="flex justify-between items-end flex-wrap gap-2">
+                        <label className="text-xs font-medium leading-none shrink-0 text-muted-foreground">
+                            候補日程の選択
+                        </label>
+                        <div className="flex gap-2">
+                            {ENABLE_CAMPUS_SQUARE && (
+                                <CampusSquareImport onImport={handleCampusSquareImport} />
+                            )}
+                        </div>
+                    </div>
                 </div>
-                <div className="w-12 h-[2px] bg-muted overflow-hidden relative">
-                    <div className={`absolute left-0 top-0 h-full bg-primary transition-all duration-300 ${step >= 2 ? 'w-full' : 'w-0'}`} />
-                </div>
-                <div className={`flex items-center gap-2 ${step >= 2 ? 'text-primary' : 'text-muted-foreground'}`}>
-                    <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs ${step >= 2 ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>2</div>
-                    カレンダーの設定
+
+                <div className="flex-1 min-h-0 relative bg-transparent sm:bg-card/10 sm:border rounded-lg overflow-hidden flex flex-col">
+                    <PeriodSelector
+                        selectedPeriods={selectedPeriods}
+                        onChange={setSelectedPeriods}
+                        busyPeriods={busyPeriods}
+                    />
                 </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-8 relative overflow-hidden min-h-[400px]">
-                {/* Step 1: Basic Info */}
-                <div className={`transition-all duration-300 absolute inset-0 space-y-8 ${step === 1 ? 'opacity-100 translate-x-0 relative' : 'opacity-0 -translate-x-12 pointer-events-none'}`}>
-                    <div className="space-y-2">
-                        <label htmlFor="title" className="text-sm font-medium leading-none">
-                            イベント名 <span className="text-red-500">*</span>
-                        </label>
-                        <Input
-                            id="title"
-                            placeholder="例: プロジェクト会議、ランチなど"
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            required={step === 1}
-                            className="text-lg py-6 bg-background/50 backdrop-blur-sm"
-                        />
-                    </div>
+            {/* Input Modal */}
+            <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <form onSubmit={handleSubmit}>
+                        <DialogHeader>
+                            <DialogTitle>イベントの詳細を設定</DialogTitle>
+                            <DialogDescription>
+                                イベントのタイトルと説明を入力して作成を完了します。
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-6 py-6">
+                            <div className="space-y-2">
+                                <label htmlFor="title" className="text-sm font-medium leading-none">
+                                    イベント名 <span className="text-red-500">*</span>
+                                </label>
+                                <Input
+                                    id="title"
+                                    placeholder="例: プロジェクト会議、ランチなど"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    required
+                                    className="text-lg py-6 bg-background/50 backdrop-blur-sm"
+                                />
+                            </div>
 
-                    <div className="space-y-2">
-                        <label htmlFor="description" className="text-sm font-medium leading-none">
-                            説明 (任意)
-                        </label>
-                        <Input
-                            id="description"
-                            placeholder="詳細を追加..."
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            className="bg-background/50 backdrop-blur-sm"
-                        />
-                    </div>
+                            <div className="space-y-2">
+                                <label htmlFor="description" className="text-sm font-medium leading-none">
+                                    説明 (任意)
+                                </label>
+                                <Input
+                                    id="description"
+                                    placeholder="詳細を追加..."
+                                    value={description}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    className="bg-background/50 backdrop-blur-sm"
+                                />
+                            </div>
+                        </div>
+                        <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2">
+                            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} className="w-full sm:w-auto">
+                                キャンセル
+                            </Button>
+                            <Button
+                                type="submit"
+                                disabled={!title || isSubmitting}
+                                className="w-full sm:w-auto shadow-lg shadow-primary/20"
+                            >
+                                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                イベントを作成
+                            </Button>
+                        </DialogFooter>
+                    </form>
+                </DialogContent>
+            </Dialog>
 
-                    <div className="flex flex-col sm:flex-row justify-end gap-4 pt-4">
-                        <Button variant="ghost" onClick={() => router.back()} type="button" className="w-full sm:w-auto">
-                            キャンセル
+            {/* Restore Draft Dialog */}
+            <Dialog open={showRestoreDialog} onOpenChange={setShowRestoreDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>下書きの復元</DialogTitle>
+                        <DialogDescription>
+                            前回選択した日程のデータが残っています。復元して続きから作成しますか？
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2">
+                        <Button
+                            variant="ghost"
+                            onClick={() => {
+                                localStorage.removeItem(DRAFT_KEY);
+                                setShowRestoreDialog(false);
+                            }}
+                        >
+                            破棄する
                         </Button>
                         <Button
-                            type="button"
-                            onClick={() => setStep(2)}
-                            disabled={!title}
-                            size="lg"
-                            className="w-full sm:w-auto shadow-sm"
+                            onClick={() => {
+                                const savedDraft = localStorage.getItem(DRAFT_KEY);
+                                if (savedDraft) {
+                                    setSelectedPeriods(JSON.parse(savedDraft));
+                                }
+                                setShowRestoreDialog(false);
+                            }}
                         >
-                            次へ (カレンダーの設定) <ArrowRight className="ml-2 h-4 w-4" />
+                            復元する
                         </Button>
-                    </div>
-                </div>
-
-                {/* Step 2: Date/Time Selection */}
-                <div className={`transition-all duration-300 absolute inset-0 space-y-6 ${step === 2 ? 'opacity-100 translate-x-0 relative' : 'opacity-0 translate-x-12 pointer-events-none'}`}>
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-end flex-wrap gap-2">
-                            <label className="text-sm font-medium leading-none shrink-0">
-                                候補日程の選択
-                            </label>
-                            <div className="flex gap-2">
-                                {/* <Button variant="outline" size="sm" type="button" onClick={handleGoogleImport} className="gap-2">
-                                <CalendarIcon className="h-4 w-4" />
-                                Googleカレンダー
-                            </Button> */}
-                                {ENABLE_CAMPUS_SQUARE && (
-                                    <CampusSquareImport onImport={handleCampusSquareImport} />
-                                )}
-                            </div>
-                        </div>
-
-                        {/* {googleData && (
-                        <div className="p-4 rounded-lg border bg-card/50 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-500">
-                            <h4 className="text-xs font-semibold mb-3 text-muted-foreground uppercase tracking-wider">表示するカレンダーを選択</h4>
-                            <div className="flex flex-wrap gap-2">
-                                {googleData.calendars.map(cal => (
-                                    <button
-                                        key={cal.id}
-                                        type="button"
-                                        onClick={() => toggleCalendar(cal.id)}
-                                        className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 flex items-center gap-2 border ${selectedCalendarIds.includes(cal.id)
-                                            ? 'bg-primary/10 border-primary text-primary shadow-sm'
-                                            : 'bg-background border-border text-muted-foreground hover:border-muted-foreground/30'
-                                            }`}
-                                    >
-                                        <div
-                                            className="w-2 h-2 rounded-full"
-                                            style={{ backgroundColor: cal.color || '#4285f4' }}
-                                        />
-                                        {cal.name}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )} */}
-                    </div>
-
-                    <div className="p-0 sm:p-4 rounded-lg sm:border bg-transparent sm:bg-card/30">
-                        <PeriodSelector
-                            selectedPeriods={selectedPeriods}
-                            onChange={setSelectedPeriods}
-                            busyPeriods={busyPeriods}
-                        />
-                    </div>
-                </div>
-
-                <div className={`flex flex-col sm:flex-row justify-end gap-4 pt-4 transition-all duration-300 ${step === 2 ? 'opacity-100' : 'opacity-0 pointer-events-none hidden'}`}>
-                    <Button variant="ghost" onClick={() => setStep(1)} type="button" className="w-full sm:w-auto gap-2">
-                        <ArrowLeft className="h-4 w-4" /> 戻る
-                    </Button>
-                    <Button
-                        onClick={handleSubmit}
-                        disabled={!title || selectedPeriods.length === 0 || isSubmitting}
-                        size="lg"
-                        className="w-full sm:w-auto shadow-lg shadow-primary/20"
-                    >
-                        {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        イベントを作成
-                    </Button>
-                </div>
-            </form>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={feedback.isOpen} onOpenChange={closeFeedback}>
                 <DialogContent>
