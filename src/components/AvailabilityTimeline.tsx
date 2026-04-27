@@ -253,8 +253,8 @@ export function AvailabilityTimeline({
                 </div>
             </div>
 
-            <ScrollArea ref={viewportRef} className="flex-1 w-full h-full relative overscroll-contain">
-                <div className="flex flex-col min-w-full inline-block pb-20">
+            <ScrollArea ref={viewportRef} className="flex-1 min-h-0 w-full relative overscroll-contain">
+                <div className="flex flex-col min-w-full pb-20">
                     {/* Header Row */}
                     <div className="sticky top-0 z-40 flex border-b bg-background w-full min-w-max">
                         <div className="sticky left-0 z-50 w-12 flex-shrink-0 border-r bg-background" />

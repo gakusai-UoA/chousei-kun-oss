@@ -335,7 +335,7 @@ export function EventForm() {
     }
 
     return (
-        <div className="w-full max-w-none mx-auto h-full flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div className="w-full max-w-none mx-auto flex-1 min-h-0 flex flex-col animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="mb-2 sm:mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0 gap-4">
                 <div className="text-left flex items-center gap-4">
                     <div>
@@ -361,7 +361,7 @@ export function EventForm() {
                 </div>
             </div>
 
-            <div className="flex-1 min-h-0 relative overflow-hidden w-full flex flex-col">
+            <div className="flex-1 min-h-0 relative w-full flex flex-col">
                 <div className="space-y-2 shrink-0 pb-2 top-0 bg-background/95 backdrop-blur z-10">
                     <div className="flex justify-between items-end flex-wrap gap-2">
                         <label className="text-xs font-medium leading-none shrink-0 text-muted-foreground">

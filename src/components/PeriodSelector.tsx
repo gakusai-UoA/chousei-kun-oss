@@ -238,7 +238,7 @@ export function PeriodSelector({
     return (
         <div className="flex flex-col md:flex-row gap-4 md:gap-6 h-full w-full overflow-hidden">
             {/* Left Sidebar */}
-            <div className="flex-none w-full md:w-72 flex flex-col gap-4 overflow-y-auto md:overflow-hidden min-h-0 md:h-full pb-4 md:pb-0 shrink-0 max-h-[40vh] md:max-h-none">
+            <div className="flex-none w-full md:w-72 flex flex-col gap-4 overflow-y-auto min-h-0 h-full pb-4 md:pb-0 shrink-0 max-h-[50vh] md:max-h-full">
                 <div className="rounded-md border bg-card p-3 shadow-sm shrink-0">
                     <h3 className="font-semibold text-sm mb-3 px-2">日付を選択</h3>
                     <Calendar
@@ -252,8 +252,8 @@ export function PeriodSelector({
                     />
                 </div>
 
-                <div className="flex-1 rounded-md border bg-card p-3 shadow-sm flex flex-col min-h-0">
-                    <h3 className="font-semibold text-sm mb-3 px-2 flex justify-between items-center">
+                <div className="flex-1 rounded-md border bg-card p-3 shadow-sm flex flex-col min-h-[200px] md:min-h-0 overflow-hidden">
+                    <h3 className="font-semibold text-sm mb-3 px-2 flex justify-between items-center shrink-0">
                         <span>クイック選択</span>
                         {focusedDate && (
                             <span className="text-xs font-normal text-muted-foreground bg-accent px-2 py-0.5 rounded">
@@ -261,7 +261,7 @@ export function PeriodSelector({
                             </span>
                         )}
                     </h3>
-                    <ScrollArea className="flex-1 pr-3">
+                    <ScrollArea className="flex-1 min-h-0">
                         <div className="space-y-3">
                             {!focusedDate ? (
                                 <div className="text-sm text-muted-foreground text-center py-8">
@@ -344,7 +344,7 @@ export function PeriodSelector({
             <div className="flex-1 rounded-md border bg-background shadow-sm flex flex-col min-h-0 relative h-full">
                 <ScrollArea className="flex-1 w-full h-full overscroll-contain">
                     {/* Container for the specific scroll content */}
-                    <div className="flex flex-col min-w-full inline-block pb-48">
+                    <div className="flex flex-col min-w-full pb-48">
 
                         {/* 1. Header Row (Sticky Top) */}
                         <div className="sticky top-0 z-40 flex border-b bg-background w-full min-w-max">

@@ -15,7 +15,8 @@ const EventForm = dynamic(() => import('@/components/EventForm').then(mod => mod
 export default function CreateEventPage() {
 	return (
 		<div className="h-dvh overflow-hidden flex flex-col bg-background text-foreground p-2 sm:p-4 md:p-6 lg:p-8">
-			<div className="mb-3 rounded-md border bg-card/40 p-3 text-sm">
+			<EventForm />
+			<div className="mt-3 shrink-0 rounded-md border bg-card/40 p-3 text-sm">
 				<p className="font-semibold">{siteConfig.name}</p>
 				<p className="text-muted-foreground">
 					{siteConfig.name} は、イベントの日程候補を作成し、参加者の出欠を集計して最適日程を決めるためのスケジュール調整アプリです。
@@ -29,7 +30,6 @@ export default function CreateEventPage() {
 					</Link>
 				</div>
 			</div>
-			<EventForm />
 		</div>
 	);
 }
