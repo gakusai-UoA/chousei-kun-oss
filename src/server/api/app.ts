@@ -62,6 +62,7 @@ const GOOGLE_SCOPES = [
 ].join(" ");
 const GOOGLE_CALENDAR_READ_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 const GOOGLE_CALENDAR_WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const AVAILABILITY_INSERT_BATCH_SIZE = 20;
 
 function getEnvOrThrow(name: string): string {
     const value = process.env[name];
@@ -186,6 +187,16 @@ async function getGoogleSessionAndScopes(db: ReturnType<typeof createDb>, sessio
     return { session, scopes };
 }
 
+async function insertAvailabilitiesInBatches(
+    db: ReturnType<typeof createDb>,
+    rows: Array<{ id: string; participantId: string; candidateIdx: number; status: number }>
+) {
+    for (let i = 0; i < rows.length; i += AVAILABILITY_INSERT_BATCH_SIZE) {
+        const chunk = rows.slice(i, i + AVAILABILITY_INSERT_BATCH_SIZE);
+        await db.insert(availabilities).values(chunk);
+    }
+}
+
 export const apiApp = new Hono<{ Bindings: Bindings }>().basePath("/api");
 
 apiApp.post("/events", sValidator("json", createEventSchema), async (c) => {
@@ -294,14 +305,13 @@ apiApp.post(
         }
 
         if (statuses.length > 0) {
-            await db.insert(availabilities).values(
-                statuses.map((status, idx) => ({
-                    id: crypto.randomUUID(),
-                    participantId: newParticipantId,
-                    candidateIdx: idx,
-                    status,
-                }))
-            );
+            const availabilityValues = statuses.map((status, idx) => ({
+                id: crypto.randomUUID(),
+                participantId: newParticipantId,
+                candidateIdx: idx,
+                status,
+            }));
+            await insertAvailabilitiesInBatches(db, availabilityValues);
         }
 
         return c.json({ success: true, participantId: newParticipantId });
@@ -409,7 +419,7 @@ apiApp.patch(
             });
         }
         if (remappedValues.length > 0) {
-            await db.insert(availabilities).values(remappedValues);
+            await insertAvailabilitiesInBatches(db, remappedValues);
         }
 
         await db

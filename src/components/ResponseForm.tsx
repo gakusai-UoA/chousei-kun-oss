@@ -36,6 +36,8 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
     new Array(candidates.length).fill(2), // Default to 'O'
   );
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+  const [isCampusImporting, setIsCampusImporting] = React.useState(false);
+  const [isGoogleImporting, setIsGoogleImporting] = React.useState(false);
   const [participantId, setParticipantId] = React.useState<string | null>(null);
 
   // Import Dialog State
@@ -271,108 +273,117 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
 
   const handleCampusSquareImport = async (uid: string, pass: string) => {
     if (!ENABLE_CAMPUS_SQUARE) return;
-
-    const res = await fetch("/api/sync-calendar", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid, pass }),
-    });
-
-    if (!res.ok) {
-      const error = (await res.json()) as { error: string };
-      throw new Error(error.error || "インポートに失敗しました");
-    }
-
-    const data = (await res.json()) as { events: { dtstart: string; dtend: string }[] };
-
-    // Conflict Detection
-    const newAvailabilities = [...availabilities];
-    let conflictCount = 0;
-
-    candidates.forEach((candidate, idx) => {
-      const { date, period } = parseCandidate(candidate);
-      if (!period) return;
-
-      const [startH, startM] = period.time.split("-")[0].split(":").map(Number);
-      const [endH, endM] = period.time.split("-")[1].split(":").map(Number);
-      const dateOnly = new Date(date);
-      dateOnly.setHours(0, 0, 0, 0);
-
-      const cStart = new Date(dateOnly);
-      cStart.setHours(startH, startM, 0, 0);
-      const cEnd = new Date(dateOnly);
-      cEnd.setHours(endH, endM, 0, 0);
-
-      // Check against each imported event
-      const hasConflict = data.events.some((ev) => {
-        const eStart = new Date(ev.dtstart);
-        const eEnd = new Date(ev.dtend);
-        return cStart < eEnd && cEnd > eStart;
+    setIsCampusImporting(true);
+    try {
+      const res = await fetch("/api/sync-calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, pass }),
       });
 
-      if (hasConflict) {
-        newAvailabilities[idx] = 0; // Mark as X
-        conflictCount++;
+      if (!res.ok) {
+        const error = (await res.json()) as { error: string };
+        throw new Error(error.error || "インポートに失敗しました");
       }
-    });
 
-    setAvailabilities(newAvailabilities);
+      const data = (await res.json()) as { events: { dtstart: string; dtend: string }[] };
 
-    if (conflictCount > 0) {
-      setFeedback({
-        title: "インポート成功",
-        message: `スケジュールをインポートしました。${conflictCount}件の重複スロットを「×」に設定しました。`,
-        isOpen: true,
+      // Conflict Detection
+      const newAvailabilities = [...availabilities];
+      let conflictCount = 0;
+
+      candidates.forEach((candidate, idx) => {
+        const { date, period } = parseCandidate(candidate);
+        if (!period) return;
+
+        const [startH, startM] = period.time.split("-")[0].split(":").map(Number);
+        const [endH, endM] = period.time.split("-")[1].split(":").map(Number);
+        const dateOnly = new Date(date);
+        dateOnly.setHours(0, 0, 0, 0);
+
+        const cStart = new Date(dateOnly);
+        cStart.setHours(startH, startM, 0, 0);
+        const cEnd = new Date(dateOnly);
+        cEnd.setHours(endH, endM, 0, 0);
+
+        // Check against each imported event
+        const hasConflict = data.events.some((ev) => {
+          const eStart = new Date(ev.dtstart);
+          const eEnd = new Date(ev.dtend);
+          return cStart < eEnd && cEnd > eStart;
+        });
+
+        if (hasConflict) {
+          newAvailabilities[idx] = 0; // Mark as X
+          conflictCount++;
+        }
       });
-    } else {
-      setFeedback({
-        title: "インポート成功",
-        message: "スケジュールをインポートしました。候補日程との重複はありませんでした。",
-        isOpen: true,
-      });
+
+      setAvailabilities(newAvailabilities);
+
+      if (conflictCount > 0) {
+        setFeedback({
+          title: "インポート成功",
+          message: `スケジュールをインポートしました。${conflictCount}件の重複スロットを「×」に設定しました。`,
+          isOpen: true,
+        });
+      } else {
+        setFeedback({
+          title: "インポート成功",
+          message: "スケジュールをインポートしました。候補日程との重複はありませんでした。",
+          isOpen: true,
+        });
+      }
+    } finally {
+      setIsCampusImporting(false);
     }
   };
 
   const handleGoogleImport = async () => {
-    const res = await fetch("/api/google/calendar/events");
-    if (res.status === 401) {
-      const url = new URL(window.location.href);
-      url.searchParams.set("googleOAuth", "1");
-      const returnTo = encodeURIComponent(url.pathname + url.search);
-      window.location.href = `/api/google/auth/start?returnTo=${returnTo}`;
-      return;
-    }
-    if (!res.ok) {
-      setFeedback({
-        title: "連携エラー",
-        message: "Googleカレンダーの取得に失敗しました。",
-        isOpen: true,
-      });
-      return;
-    }
+    setIsGoogleImporting(true);
+    try {
+      const res = await fetch("/api/google/calendar/events");
+      if (res.status === 401) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("googleOAuth", "1");
+        const returnTo = encodeURIComponent(url.pathname + url.search);
+        window.location.href = `/api/google/auth/start?returnTo=${returnTo}`;
+        return;
+      }
+      if (!res.ok) {
+        setFeedback({
+          title: "連携エラー",
+          message: "Googleカレンダーの取得に失敗しました。",
+          isOpen: true,
+        });
+        return;
+      }
 
-    const googleData = (await res.json()) as {
-      email?: string;
-      events: any[];
-    };
-    const events = (googleData.events || []).filter((ev: any) => !isExcludedCalendarEvent(ev));
-    const detectedEmail = googleData.email || "";
+      const googleData = (await res.json()) as {
+        email?: string;
+        events: any[];
+      };
+      const events = (googleData.events || []).filter((ev: any) => !isExcludedCalendarEvent(ev));
+      const detectedEmail = googleData.email || "";
 
-    if (detectedEmail) {
-      setNotificationEmail(detectedEmail);
-      setNotifyOnFinalize(true);
+      if (detectedEmail) {
+        setNotificationEmail(detectedEmail);
+        setNotifyOnFinalize(true);
+      }
+
+      const allDayEvents = events.filter((ev: any) => isAllDayEvent(ev) && hasAllDayOverlapWithCandidates(ev));
+      if (allDayEvents.length > 0) {
+        const allDayDates = Array.from(new Set(allDayEvents.map((ev: any) => String(ev.dtstart || ev.start))));
+        setPendingGoogleEvents(events);
+        setPendingAllDayDates(allDayDates as string[]);
+        setShowAllDayDialog(true);
+        return;
+      }
+
+      applyGoogleConflicts(events, false, detectedEmail);
+    } finally {
+      setIsGoogleImporting(false);
     }
-
-    const allDayEvents = events.filter((ev: any) => isAllDayEvent(ev) && hasAllDayOverlapWithCandidates(ev));
-    if (allDayEvents.length > 0) {
-      const allDayDates = Array.from(new Set(allDayEvents.map((ev: any) => String(ev.dtstart || ev.start))));
-      setPendingGoogleEvents(events);
-      setPendingAllDayDates(allDayDates as string[]);
-      setShowAllDayDialog(true);
-      return;
-    }
-
-    applyGoogleConflicts(events, false, detectedEmail);
   };
 
   React.useEffect(() => {
@@ -480,11 +491,14 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {ENABLE_CAMPUS_SQUARE && <CampusSquareImport onImport={handleCampusSquareImport} buttonLabel="時間割をインポート" description="スケジュールの重複を確認します。重複するスロットは自動的に「×」に設定されます。" actionLabel="インポートして重複を確認" />}
-          <Button variant="outline" size="sm" type="button" onClick={handleGoogleImport} className="gap-2">
-            <CalendarIcon className="h-4 w-4" />
-            Googleカレンダーをインポート
+          <Button variant="outline" size="sm" type="button" onClick={handleGoogleImport} className="gap-2" disabled={isGoogleImporting}>
+            {isGoogleImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarIcon className="h-4 w-4" />}
+            {isGoogleImporting ? "読み込み中..." : "Googleカレンダーをインポート"}
           </Button>
         </div>
+        {(isCampusImporting || isGoogleImporting) && (
+          <p className="text-sm text-muted-foreground">カレンダーを読み込み中です...</p>
+        )}
       </div>
 
       <div className="space-y-6">
