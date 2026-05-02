@@ -1,0 +1,91 @@
+import { eq } from "drizzle-orm";
+import type { DbClient } from "@/server/db/client";
+import { events, participants, availabilities } from "@/server/db/schema";
+import type { Event, Participant, Availability, EventPublicView } from "@/types";
+
+export class EventService {
+    constructor(private db: DbClient) {}
+
+    async findById(id: string): Promise<Event | null> {
+        const event = await this.db.query.events.findFirst({
+            where: eq(events.id, id),
+        });
+        return event ?? null;
+    }
+
+    async findByIdPublic(id: string): Promise<EventPublicView | null> {
+        const event = await this.db.query.events.findFirst({
+            where: eq(events.id, id),
+            columns: {
+                id: true,
+                title: true,
+                description: true,
+                candidates: true,
+                confirmedCandidateIdx: true,
+            },
+        });
+        if (!event) return null;
+
+        return {
+            ...event,
+            candidates: JSON.parse(event.candidates) as string[],
+        };
+    }
+
+    async findByIdWithAuth(id: string): Promise<Pick<Event, "id" | "candidates" | "adminAccessToken"> | null> {
+        const event = await this.db.query.events.findFirst({
+            where: eq(events.id, id),
+            columns: {
+                id: true,
+                candidates: true,
+                adminAccessToken: true,
+            },
+        });
+        return event ?? null;
+    }
+
+    async findByIdForAdmin(id: string): Promise<(Omit<Event, "candidates"> & { candidates: string[] }) | null> {
+        const event = await this.db.query.events.findFirst({
+            where: eq(events.id, id),
+        });
+        if (!event) return null;
+        
+        return {
+            ...event,
+            candidates: JSON.parse(event.candidates) as string[],
+        };
+    }
+
+    async getParticipants(eventId: string): Promise<Participant[]> {
+        return this.db.query.participants.findMany({
+            where: eq(participants.eventId, eventId),
+        });
+    }
+
+    async getAvailabilities(eventId: string): Promise<Availability[]> {
+        return this.db
+            .select({
+                id: availabilities.id,
+                participantId: availabilities.participantId,
+                candidateIdx: availabilities.candidateIdx,
+                status: availabilities.status,
+            })
+            .from(availabilities)
+            .innerJoin(participants, eq(availabilities.participantId, participants.id))
+            .where(eq(participants.eventId, eventId));
+    }
+
+    async getEventWithParticipantsAndAvailabilities(eventId: string) {
+        const [event, participantList, availabilityList] = await Promise.all([
+            this.findByIdPublic(eventId),
+            this.getParticipants(eventId),
+            this.getAvailabilities(eventId),
+        ]);
+
+        return { event, participants: participantList, availabilities: availabilityList };
+    }
+}
+
+export function createEventService(db: DbClient): EventService {
+    return new EventService(db);
+}

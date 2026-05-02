@@ -7,7 +7,10 @@ import { Input } from "@/components/ui/input";
 import { AvailabilityTimeline } from "@/components/AvailabilityTimeline";
 import { PeriodSelector, CUSTOM_PERIODS } from "@/components/PeriodSelector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ParticipantComments } from "@/components/ParticipantComments";
+import { CalendarExportDialog } from "@/components/CalendarExportDialog";
 import { Check } from "lucide-react";
+import { logActivity } from "@/hooks/useActivityLog";
 
 type Props = {
     eventId: string;
@@ -16,7 +19,7 @@ type Props = {
     initialCandidates: string[];
     initialConfirmedCandidateIdx: number | null;
     participants: { id: string; name: string; comment: string | null }[];
-    availabilities: { participant_id: string; candidate_idx: number; status: number }[];
+    availabilities: { participantId: string; candidateIdx: number; status: number }[];
 };
 
 export function AdminEventSettings({
@@ -40,6 +43,9 @@ export function AdminEventSettings({
     const [error, setError] = useState<string>("");
     const [needsGoogleReauth, setNeedsGoogleReauth] = useState(false);
     const [googleSessionEmail, setGoogleSessionEmail] = useState<string>("");
+    const [hasGoogleSession, setHasGoogleSession] = useState(false);
+    const [showCalendarExportDialog, setShowCalendarExportDialog] = useState(false);
+    const [pendingConfirmedIdx, setPendingConfirmedIdx] = useState<number | null>(null);
     const completeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
@@ -55,6 +61,7 @@ export function AdminEventSettings({
                 };
                 if (cancelled) return;
                 setGoogleSessionEmail(data.email ?? "");
+                setHasGoogleSession(data.hasSession && data.hasCalendarWriteScope);
                 setNeedsGoogleReauth(data.hasSession && !data.hasCalendarWriteScope);
             } catch {
                 // Ignore status check failures and keep the page usable.
@@ -95,7 +102,7 @@ export function AdminEventSettings({
         sortedCandidates.forEach((candidate, idx) => oldCandidateToNewIndex.set(candidate, idx));
 
         availabilities.forEach((availability) => {
-            const oldCandidate = initialCandidates[availability.candidate_idx];
+            const oldCandidate = initialCandidates[availability.candidateIdx];
             if (!oldCandidate) return;
             const newIdx = oldCandidateToNewIndex.get(oldCandidate);
             if (newIdx === undefined) return;
@@ -125,12 +132,12 @@ export function AdminEventSettings({
         sortedCandidates.forEach((candidate, idx) => oldCandidateToNewIndex.set(candidate, idx));
 
         availabilities.forEach((availability) => {
-            const oldCandidate = initialCandidates[availability.candidate_idx];
+            const oldCandidate = initialCandidates[availability.candidateIdx];
             if (!oldCandidate) return;
             const newIdx = oldCandidateToNewIndex.get(oldCandidate);
             if (newIdx === undefined) return;
 
-            const name = participantNameById.get(availability.participant_id);
+            const name = participantNameById.get(availability.participantId);
             if (!name) return;
 
             if (availability.status === 2) participantsByCandidate[newIdx].ok.push(name);
@@ -183,24 +190,48 @@ export function AdminEventSettings({
     };
 
     const confirmCandidate = async (idx: number | null) => {
+        logActivity("日程確定開始", idx !== null ? `候補インデックス: ${idx}` : "確定解除");
         setError("");
         setIsConfirming(true);
         try {
             const res = await fetch(`/api/events/${eventId}/admin/confirm`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ confirmedCandidateIdx: idx }),
+                body: JSON.stringify({ confirmedCandidateIdx: idx, skipCalendarInvite: true }),
             });
             if (!res.ok) {
                 const data = await res.json() as { error?: string };
+                logActivity("日程確定失敗", data.error || "不明なエラー");
                 throw new Error(data.error || "確定に失敗しました。");
             }
+            logActivity("日程確定成功", idx !== null ? `候補インデックス: ${idx}` : "確定解除");
             setConfirmedCandidateIdx(idx);
+            
+            if (idx !== null) {
+                setPendingConfirmedIdx(idx);
+                setShowCalendarExportDialog(true);
+            }
+            
             router.refresh();
         } catch (err) {
             setError(err instanceof Error ? err.message : "確定に失敗しました。");
         } finally {
             setIsConfirming(false);
+        }
+    };
+
+    const addToGoogleCalendar = async () => {
+        if (pendingConfirmedIdx === null) return;
+        
+        const res = await fetch(`/api/events/${eventId}/admin/add-to-calendar`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirmedCandidateIdx: pendingConfirmedIdx }),
+        });
+        
+        if (!res.ok) {
+            const data = await res.json() as { error?: string };
+            throw new Error(data.error || "Googleカレンダーへの追加に失敗しました。");
         }
     };
 
@@ -279,6 +310,8 @@ export function AdminEventSettings({
                 </TabsContent>
             </Tabs>
 
+            <ParticipantComments participants={participants} />
+
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
             {activeTab === "edit" ? (
@@ -301,6 +334,18 @@ export function AdminEventSettings({
                     </Button>
                 </div>
             ) : null}
+
+            {pendingConfirmedIdx !== null && (
+                <CalendarExportDialog
+                    open={showCalendarExportDialog}
+                    onOpenChange={setShowCalendarExportDialog}
+                    eventTitle={title}
+                    eventDescription={description}
+                    confirmedCandidate={sortedCandidates[pendingConfirmedIdx] ?? ""}
+                    hasGoogleSession={hasGoogleSession}
+                    onAddToGoogleCalendar={addToGoogleCalendar}
+                />
+            )}
         </form>
     );
 }

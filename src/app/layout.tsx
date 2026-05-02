@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { siteConfig } from "@/config/site";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
+import { FeedbackButton } from "@/components/FeedbackButton";
 
 const geistSans = Geist({
 	variable: "--font-geist-sans",
@@ -37,6 +38,7 @@ export default function RootLayout({
 					disableTransitionOnChange
 				>
 					{children}
+					<FeedbackButton />
 				</ThemeProvider>
 			</body>
 		</html>

@@ -12,19 +12,22 @@ import { Check, X, Triangle, Circle, Loader2, Calendar as CalendarIcon } from "l
 import { siteConfig } from "@/config/site";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import dynamic from "next/dynamic";
+import { useUser } from "@/hooks/useUser";
+import { logActivity } from "@/hooks/useActivityLog";
 
 const CampusSquareImport = dynamic(() => import("@/components/CampusSquareImport"), { ssr: false });
 
 interface ResponseFormProps {
   eventId: string;
   candidates: string[];
-  participants: { id: string; name: string; comment: string; notify_on_finalize?: number; notification_email?: string | null }[];
-  allAvailabilities: { participant_id: string; candidate_idx: number; status: number }[];
+  participants: { id: string; name: string; comment: string | null; notifyOnFinalize?: number; notificationEmail?: string | null }[];
+  allAvailabilities: { participantId: string; candidateIdx: number; status: number }[];
   onSuccess: () => Promise<void>;
 }
 
 export function ResponseForm({ eventId, candidates, participants, allAvailabilities, onSuccess }: ResponseFormProps) {
   const router = useRouter();
+  const { userId } = useUser();
   const [name, setName] = React.useState("");
   const [comment, setComment] = React.useState("");
   const [notifyOnFinalize, setNotifyOnFinalize] = React.useState(false);
@@ -195,8 +198,8 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
   const okCounts = React.useMemo(() => {
     const counts = new Array(candidates.length).fill(0);
     allAvailabilities.forEach((a) => {
-      if (a.candidate_idx < candidates.length && a.status === 2) {
-        counts[a.candidate_idx]++;
+      if (a.candidateIdx < candidates.length && a.status === 2) {
+        counts[a.candidateIdx]++;
       }
     });
     return counts;
@@ -228,17 +231,17 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
         setParticipantId(storedId);
         setName(existingParticipant.name);
         setComment(existingParticipant.comment || "");
-        setNotifyOnFinalize((existingParticipant.notify_on_finalize ?? 0) === 1);
-        setNotificationEmail(existingParticipant.notification_email || "");
+        setNotifyOnFinalize((existingParticipant.notifyOnFinalize ?? 0) === 1);
+        setNotificationEmail(existingParticipant.notificationEmail || "");
 
         // Reconstruct availabilities
-        const myAvails = allAvailabilities.filter((a) => a.participant_id === storedId);
+        const myAvails = allAvailabilities.filter((a) => a.participantId === storedId);
         const newAvails = new Array(candidates.length).fill(2); // Default to O
         // Note: If no availability record exists for a candidate, it remains default.
         // But usually we save all.
         myAvails.forEach((a) => {
-          if (a.candidate_idx < newAvails.length) {
-            newAvails[a.candidate_idx] = a.status;
+          if (a.candidateIdx < newAvails.length) {
+            newAvails[a.candidateIdx] = a.status;
           }
         });
         setAvailabilities(newAvails);
@@ -419,18 +422,10 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();
-    const canConfigureNotification = Boolean(participantId);
-    const effectiveNotifyOnFinalize = canConfigureNotification ? notifyOnFinalize : false;
-    const effectiveNotificationEmail = canConfigureNotification ? notificationEmail.trim() : "";
+    const isEditing = Boolean(participantId);
     if (!trimmedName) return;
-    if (effectiveNotifyOnFinalize && !effectiveNotificationEmail) {
-      setFeedback({
-        title: "入力エラー",
-        message: "確定通知を受け取る場合はメールアドレスを入力してください。",
-        isOpen: true,
-      });
-      return;
-    }
+    
+    logActivity(isEditing ? "回答更新開始" : "回答送信開始", `イベント: ${eventId}`);
     setIsSubmitting(true);
     try {
       const res = await fetch(`/api/events/${eventId}/participate`, {
@@ -441,35 +436,35 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
           comment,
           availabilities,
           participantId: participantId || undefined,
-          notifyOnFinalize: effectiveNotifyOnFinalize,
-          notificationEmail: effectiveNotificationEmail,
+          userId: userId || undefined,
+          notifyOnFinalize: notifyOnFinalize,
+          notificationEmail: notificationEmail.trim(),
         }),
       });
 
-      if (!res.ok) throw new Error("送信に失敗しました");
+      if (!res.ok) {
+        logActivity(isEditing ? "回答更新失敗" : "回答送信失敗", `ステータス: ${res.status}`);
+        throw new Error("送信に失敗しました");
+      }
 
       const data = (await res.json()) as { participantId: string };
-      // Store ID for future edits
       if (data.participantId) {
         localStorage.setItem(`chosei_participant_${eventId}`, data.participantId);
-        setParticipantId(data.participantId);
       }
 
+      logActivity(isEditing ? "回答更新成功" : "回答送信成功", `イベント: ${eventId}`);
       await onSuccess();
-      // Don't clear form if editing, just refresh to show updated data?
-      // Actually router.refresh() in onSuccess usually handles update.
-      // If we want to show "Submitted!", maybe we can.
-      // But if we are "editing", we persist the state.
-      if (!participantId) {
-        // If it was a new submission, keep the specific ID and state so they can edit it immediately if they want.
-        // So we DON'T clear name/comment.
+
+      if (isEditing) {
+        setFeedback({
+          title: "成功",
+          message: "回答を更新しました！",
+          isOpen: true,
+        });
+        router.refresh();
+      } else {
+        router.push(`/${eventId}/complete`);
       }
-      setFeedback({
-        title: "成功",
-        message: participantId ? "回答を更新しました！" : "回答を送信しました！",
-        isOpen: true,
-      });
-      router.refresh();
     } catch (err: any) {
       console.error(err);
       setFeedback({

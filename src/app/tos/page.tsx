@@ -1,4 +1,12 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+	title: "利用規約",
+	description: "調整くんの利用規約について",
+};
+
+export const revalidate = 86400;
 
 export default function TermsOfServicePage() {
 	return (

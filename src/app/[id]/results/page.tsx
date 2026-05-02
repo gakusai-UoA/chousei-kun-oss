@@ -3,31 +3,19 @@ import { notFound } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { EventResultsCalendar } from "@/components/EventResultsCalendar";
+import { EventResultsView } from "@/components/EventResultsView";
+import { createDb } from "@/server/db/client";
+import { createEventService } from "@/server/services";
 
 export default async function ResultsPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     const { env } = await getCloudflareContext();
+    const db = createDb(env.DB);
+    const eventService = createEventService(db);
 
-    const event = await env.DB.prepare(
-        "SELECT id, title, description, candidates, confirmed_candidate_idx FROM events WHERE id = ?"
-    ).bind(id).first<{
-        id: string;
-        title: string;
-        description: string | null;
-        candidates: string;
-        confirmed_candidate_idx: number | null;
-    }>();
+    const { event, participants, availabilities } = await eventService.getEventWithParticipantsAndAvailabilities(id);
 
     if (!event) notFound();
-
-    const parsedEvent = {
-        id: event.id,
-        title: event.title,
-        description: event.description,
-        candidates: JSON.parse(event.candidates) as string[],
-        confirmedCandidateIdx: event.confirmed_candidate_idx,
-    };
 
     return (
         <div className="min-h-screen bg-background text-foreground p-2 sm:p-4 md:p-6 lg:p-8">
@@ -40,14 +28,18 @@ export default async function ResultsPage({ params }: { params: Promise<{ id: st
                     </Link>
                     <div>
                         <h1 className="text-2xl font-bold">回答結果</h1>
-                        <p className="text-muted-foreground text-sm">{parsedEvent.title} の回答状況</p>
+                        <p className="text-muted-foreground text-sm">{event.title} の回答状況</p>
                     </div>
                 </div>
 
-                <EventResultsCalendar
+                <EventResultsView
                     eventId={id}
-                    candidates={parsedEvent.candidates}
-                    confirmedCandidateIdx={parsedEvent.confirmedCandidateIdx}
+                    eventTitle={event.title}
+                    eventDescription={event.description}
+                    candidates={event.candidates}
+                    confirmedCandidateIdx={event.confirmedCandidateIdx}
+                    participants={participants}
+                    availabilities={availabilities}
                 />
             </div>
         </div>

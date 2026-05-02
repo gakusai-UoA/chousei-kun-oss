@@ -13,6 +13,55 @@ const nextConfig: NextConfig = {
 	turbopack: {
 		root: projectRoot,
 	},
+	
+	// Cloudflare Workers compatibility
+	experimental: {
+		serverActions: {
+			bodySizeLimit: "1mb",
+		},
+	},
+	
+	// Optimize for Cloudflare
+	poweredByHeader: false,
+	
+	// Strict mode for better error detection
+	reactStrictMode: true,
+	
+	// Headers for security and caching
+	async headers() {
+		return [
+			{
+				source: "/:path*",
+				headers: [
+					{
+						key: "X-Content-Type-Options",
+						value: "nosniff",
+					},
+					{
+						key: "X-Frame-Options",
+						value: "DENY",
+					},
+					{
+						key: "X-XSS-Protection",
+						value: "1; mode=block",
+					},
+					{
+						key: "Referrer-Policy",
+						value: "strict-origin-when-cross-origin",
+					},
+				],
+			},
+			{
+				source: "/api/:path*",
+				headers: [
+					{
+						key: "Cache-Control",
+						value: "no-store, max-age=0",
+					},
+				],
+			},
+		];
+	},
 };
 
 export default nextConfig;

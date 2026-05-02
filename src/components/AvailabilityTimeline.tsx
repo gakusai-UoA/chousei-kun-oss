@@ -1,6 +1,6 @@
 "use client";
 
-import * as React from "react";
+import { memo, useState, useRef, useMemo, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { X, Triangle, Circle, ZoomIn, ZoomOut } from "lucide-react";
@@ -62,7 +62,7 @@ const getBlockStyle = (startMin: number, endMin: number, zoomLevel: number) => {
     return { top: `${top}px`, height: `${height}px` };
 };
 
-export function AvailabilityTimeline({
+export const AvailabilityTimeline = memo(function AvailabilityTimeline({
     candidates,
     availabilities,
     onStatusChange,
@@ -75,23 +75,23 @@ export function AvailabilityTimeline({
     candidateParticipants = [],
     onConfirmCandidate
 }: AvailabilityTimelineProps) {
-    const [focusedDate, setFocusedDate] = React.useState<Date | null>(null);
-    const viewportRef = React.useRef<HTMLDivElement>(null);
-    const [zoomLevel, setZoomLevel] = React.useState(1.8);
-    const [selectedParticipantView, setSelectedParticipantView] = React.useState<{
+    const [focusedDate, setFocusedDate] = useState<Date | null>(null);
+    const viewportRef = useRef<HTMLDivElement>(null);
+    const [zoomLevel, setZoomLevel] = useState(1.8);
+    const [selectedParticipantView, setSelectedParticipantView] = useState<{
         candidateIdx: number;
         status: "ok" | "maybe" | "ng";
     } | null>(null);
-    const candidateScores = React.useMemo(
+    const candidateScores = useMemo(
         () => candidateStats.map((s) => s.ok * 2 + s.maybe),
         [candidateStats]
     );
-    const maxScore = React.useMemo(
+    const maxScore = useMemo(
         () => (candidateScores.length > 0 ? Math.max(...candidateScores) : 0),
         [candidateScores]
     );
 
-    React.useEffect(() => {
+    useEffect(() => {
         const viewport = viewportRef.current;
         if (!viewport) return;
 
@@ -112,7 +112,7 @@ export function AvailabilityTimeline({
         };
     }, []);
 
-    const earliestStartMin = React.useMemo(() => {
+    const earliestStartMin = useMemo(() => {
         if (candidates.length === 0) return 0;
         let min = 1440; // 24 hours
         candidates.forEach(c => {
@@ -127,7 +127,7 @@ export function AvailabilityTimeline({
         return min === 1440 ? 0 : min;
     }, [candidates]);
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (viewportRef.current && earliestStartMin > 0) {
             const scrollPos = (earliestStartMin - START_MINUTES) * zoomLevel;
             // Slightly offset to show the header clearly
@@ -135,7 +135,7 @@ export function AvailabilityTimeline({
         }
     }, [earliestStartMin, zoomLevel]);
 
-    const viewDates = React.useMemo(() => {
+    const viewDates = useMemo(() => {
         const datesMap = new Map<string, Date>();
         candidates.forEach(c => {
             const dateStr = c.split("_")[0];
@@ -147,22 +147,22 @@ export function AvailabilityTimeline({
         return sorted;
     }, [candidates]);
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (!focusedDate && viewDates.length > 0) {
             setFocusedDate(viewDates[0]);
         }
     }, [viewDates, focusedDate]);
 
 
-    const renderStatusIcon = (status: number) => {
+    const renderStatusIcon = useCallback((status: number) => {
         switch (status) {
             case 0: return <X className="w-4 h-4 text-red-500" />;
             case 1: return <Triangle className="w-4 h-4 text-yellow-500" />;
             case 2: return <Circle className="w-4 h-4 text-green-500" />;
             default: return null;
         }
-    };
-    const getCandidateDisplayText = React.useCallback((idx: number) => {
+    }, []);
+    const getCandidateDisplayText = useCallback((idx: number) => {
         const candidate = candidates[idx];
         if (!candidate) return "";
         const [datePart, slot] = candidate.split("_");
@@ -557,4 +557,4 @@ export function AvailabilityTimeline({
             </Dialog>
         </div>
     );
-}
+});

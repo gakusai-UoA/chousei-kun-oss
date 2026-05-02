@@ -1,4 +1,12 @@
 import Link from "next/link";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+	title: "プライバシーポリシー",
+	description: "調整くんのプライバシーポリシーについて",
+};
+
+export const revalidate = 86400;
 
 export default function PrivacyPolicyPage() {
 	return (

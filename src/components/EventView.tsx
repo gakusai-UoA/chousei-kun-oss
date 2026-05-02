@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { CUSTOM_PERIODS, HOURLY_SLOTS } from "@/components/PeriodSelector";
 import { cn } from "@/lib/utils";
 import { Check, X, Triangle, Circle } from "lucide-react";
+import { budouxify } from "@/lib/budoux";
 
 interface Event {
     id: string;
@@ -83,12 +84,12 @@ export function EventView({ event, participants, availabilities }: EventViewProp
     return (
         <div className="w-full animate-in fade-in zoom-in duration-500">
             <div className="mb-6">
-                <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
-                    {event.title}
+                <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+                    {budouxify(event.title)}
                 </h1>
                 {event.description && (
-                    <p className="text-lg text-muted-foreground mt-2 leading-relaxed">
-                        {event.description}
+                    <p className="text-lg text-muted-foreground mt-2 leading-relaxed" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+                        {budouxify(event.description)}
                     </p>
                 )}
             </div>

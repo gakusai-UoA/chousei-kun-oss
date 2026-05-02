@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
+import { createDb } from "@/server/db/client";
+import { createEventService } from "@/server/services";
 
 const ResponseForm = dynamic(() => import('@/components/ResponseForm').then(mod => mod.ResponseForm), {
     loading: () => (
@@ -18,34 +20,14 @@ const ResponseForm = dynamic(() => import('@/components/ResponseForm').then(mod 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     const { env } = await getCloudflareContext();
+    const db = createDb(env.DB);
+    const eventService = createEventService(db);
 
-    const event = await env.DB.prepare("SELECT id, title, description, candidates FROM events WHERE id = ?").bind(id).first<{
-        id: string;
-        title: string;
-        description: string | null;
-        candidates: string;
-    }>();
+    const { event, participants, availabilities } = await eventService.getEventWithParticipantsAndAvailabilities(id);
 
     if (!event) {
         notFound();
     }
-
-    // Parse candidates
-    const parsedEvent = {
-        id: event.id,
-        title: event.title,
-        description: event.description ?? "",
-        candidates: JSON.parse(event.candidates as string) as string[]
-    };
-
-    const { results: participants } = await env.DB.prepare("SELECT * FROM participants WHERE event_id = ?").bind(id).all();
-
-    // Get availabilities
-    const { results: availabilities } = await env.DB.prepare(
-        `SELECT a.* FROM availabilities a
-       JOIN participants p ON a.participant_id = p.id
-       WHERE p.event_id = ?`
-    ).bind(id).all();
 
     async function revalidateEvent() {
         "use server";
@@ -57,8 +39,8 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
             <div className="w-full space-y-8">
                 <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
                     <div>
-                        <h1 className="text-4xl font-extrabold tracking-tight">{parsedEvent.title}</h1>
-                        <p className="text-muted-foreground mt-2 text-lg">{parsedEvent.description}</p>
+                        <h1 className="text-4xl font-extrabold tracking-tight">{event.title}</h1>
+                        <p className="text-muted-foreground mt-2 text-lg">{event.description ?? ""}</p>
                     </div>
                     <Link href={`/${id}/results`}>
                         <Button variant="outline" className="gap-2 group">
@@ -70,9 +52,9 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
 
                 <ResponseForm
                     eventId={id}
-                    candidates={parsedEvent.candidates}
-                    participants={participants as any[]}
-                    allAvailabilities={availabilities as any[]}
+                    candidates={event.candidates}
+                    participants={participants}
+                    allAvailabilities={availabilities}
                     onSuccess={revalidateEvent}
                 />
             </div>

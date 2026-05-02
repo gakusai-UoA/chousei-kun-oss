@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { siteConfig } from "@/config/site";
 import { Calendar, Users, CheckCircle, ArrowRight } from "lucide-react";
 import type { Metadata } from "next";
+import { budouxify } from "@/lib/budoux";
 
 export const metadata: Metadata = {
 	title: `${siteConfig.name} - スケジュール調整アプリ`,
@@ -41,13 +42,13 @@ export default function LandingPage() {
 						<h1 id="hero-title" className="text-4xl sm:text-5xl font-extrabold tracking-tight">
 							{siteConfig.name}
 						</h1>
-						<p className="text-xl sm:text-2xl text-muted-foreground max-w-2xl mx-auto">
-							イベントの日程候補を作成し、参加者の出欠を集計して最適な日程を決めるためのスケジュール調整アプリです。
+						<p className="text-xl sm:text-2xl text-muted-foreground max-w-2xl mx-auto" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+							{budouxify("イベントの日程候補を作成し、参加者の出欠を集計して最適な日程を決めるためのスケジュール調整アプリです。")}
 						</p>
 						<div className="pt-4">
 							<Link href="/create">
 								<Button size="lg" className="text-lg px-8 py-6 gap-2">
-									予定調整を始める
+									{budouxify("予定調整を始める")}
 									<ArrowRight className="h-5 w-5" aria-hidden="true" />
 								</Button>
 							</Link>
@@ -63,27 +64,27 @@ export default function LandingPage() {
 							<div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center" aria-hidden="true">
 								<Calendar className="h-6 w-6 text-primary" />
 							</div>
-							<h3 className="font-semibold text-lg">簡単に候補日を作成</h3>
-							<p className="text-muted-foreground text-sm">
-								カレンダーから候補日時を選択するだけで、すぐに調整を開始できます。
+							<h3 className="font-semibold text-lg" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>{budouxify("簡単に候補日を作成")}</h3>
+							<p className="text-muted-foreground text-sm" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+								{budouxify("カレンダーから候補日時を選択するだけで、すぐに調整を開始できます。")}
 							</p>
 						</li>
 						<li className="text-center space-y-3 p-6 rounded-lg border bg-card/50">
 							<div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center" aria-hidden="true">
 								<Users className="h-6 w-6 text-primary" />
 							</div>
-							<h3 className="font-semibold text-lg">参加者の出欠を集計</h3>
-							<p className="text-muted-foreground text-sm">
-								URLを共有するだけで、参加者が簡単に出欠を回答できます。
+							<h3 className="font-semibold text-lg" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>{budouxify("参加者の出欠を集計")}</h3>
+							<p className="text-muted-foreground text-sm" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+								{budouxify("URLを共有するだけで、参加者が簡単に出欠を回答できます。")}
 							</p>
 						</li>
 						<li className="text-center space-y-3 p-6 rounded-lg border bg-card/50">
 							<div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center" aria-hidden="true">
 								<CheckCircle className="h-6 w-6 text-primary" />
 							</div>
-							<h3 className="font-semibold text-lg">最適な日程を決定</h3>
-							<p className="text-muted-foreground text-sm">
-								集計結果から最適な日程を選び、参加者に通知できます。
+							<h3 className="font-semibold text-lg" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>{budouxify("最適な日程を決定")}</h3>
+							<p className="text-muted-foreground text-sm" style={{ wordBreak: "keep-all", overflowWrap: "anywhere" }}>
+								{budouxify("集計結果から最適な日程を選び、参加者に通知できます。")}
 							</p>
 						</li>
 					</ul>

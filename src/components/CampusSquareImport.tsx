@@ -24,7 +24,7 @@ interface CampusSquareImportProps {
 export default function CampusSquareImport({
     onImport,
     buttonLabel = "大学の時間割",
-    description = "IDとパスワードを入力して時間割を取得します。パスワードは連携先のサーバーへ直接送信され、保存されません。",
+    description = "IDとパスワードを入力して時間割を取得します。入力情報はサーバー経由で連携先に送信され、当サービスには保存されません。",
     actionLabel = "インポート"
 }: CampusSquareImportProps) {
     const [isOpen, setIsOpen] = React.useState(false);

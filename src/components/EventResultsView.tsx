@@ -1,14 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
 import { AvailabilityTimeline } from "@/components/AvailabilityTimeline";
 import { ParticipantComments } from "@/components/ParticipantComments";
-
-type Props = {
-    eventId: string;
-    candidates: string[];
-    confirmedCandidateIdx: number | null;
-};
+import { ConfirmedScheduleCard } from "@/components/ConfirmedScheduleCard";
 
 type Participant = {
     id: string;
@@ -23,34 +18,25 @@ type Availability = {
     status: number;
 };
 
-export function EventResultsCalendar({ eventId, candidates, confirmedCandidateIdx }: Props) {
-    const [participants, setParticipants] = useState<Participant[]>([]);
-    const [availabilities, setAvailabilities] = useState<Availability[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+type Props = {
+    eventId: string;
+    eventTitle: string;
+    eventDescription?: string | null;
+    candidates: string[];
+    confirmedCandidateIdx: number | null;
+    participants: Participant[];
+    availabilities: Availability[];
+};
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const res = await fetch(`/api/events/${eventId}`);
-                if (!res.ok) {
-                    throw new Error(`Failed to fetch: ${res.status}`);
-                }
-                const data = await res.json() as {
-                    participants?: Participant[];
-                    availabilities?: Availability[];
-                };
-                setParticipants(data.participants || []);
-                setAvailabilities(data.availabilities || []);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : "Unknown error");
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchData();
-    }, [eventId]);
-
+export const EventResultsView = memo(function EventResultsView({ 
+    eventId,
+    eventTitle,
+    eventDescription,
+    candidates, 
+    confirmedCandidateIdx, 
+    participants, 
+    availabilities 
+}: Props) {
     const participantNameById = useMemo(() => {
         const map = new Map<string, string>();
         participants.forEach((p) => {
@@ -95,16 +81,18 @@ export function EventResultsCalendar({ eventId, candidates, confirmedCandidateId
         return participantsByCandidate;
     }, [availabilities, candidates, participantNameById]);
 
-    if (loading) {
-        return <div className="p-8 text-center text-muted-foreground">読み込み中...</div>;
-    }
-
-    if (error) {
-        return <div className="p-8 text-center text-red-500">エラー: {error}</div>;
-    }
+    const confirmedCandidate = confirmedCandidateIdx !== null ? candidates[confirmedCandidateIdx] : null;
 
     return (
         <div className="space-y-6">
+            {confirmedCandidate && (
+                <ConfirmedScheduleCard
+                    eventId={eventId}
+                    eventTitle={eventTitle}
+                    eventDescription={eventDescription}
+                    confirmedCandidate={confirmedCandidate}
+                />
+            )}
             <AvailabilityTimeline
                 candidates={candidates}
                 availabilities={candidates.map(() => 2)}
@@ -118,4 +106,4 @@ export function EventResultsCalendar({ eventId, candidates, confirmedCandidateId
             <ParticipantComments participants={participants} />
         </div>
     );
-}
+});
