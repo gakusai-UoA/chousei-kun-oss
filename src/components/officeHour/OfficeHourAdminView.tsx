@@ -298,7 +298,7 @@ export function OfficeHourAdminView({ id }: { id: string }) {
 
     if (authorized === null && isLoading) {
         return (
-            <div className="flex items-center justify-center py-24 gap-2 text-muted-foreground">
+            <div className="flex items-center justify-center min-h-[50vh] gap-2 text-muted-foreground">
                 <Loader2 className="h-5 w-5 animate-spin" /> 読み込み中...
             </div>
         );

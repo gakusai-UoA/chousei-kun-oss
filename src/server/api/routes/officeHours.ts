@@ -15,6 +15,7 @@ import {
 import { parseCookieValue, refreshGoogleTokenIfNeeded } from "../utils";
 import { verifyPassword } from "@/lib/admin-auth";
 import { COOKIE_NAMES } from "@/lib/constants";
+import { syncOneOfficeHour } from "@/server/cron/sync-host-busy";
 
 type Bindings = { DB: D1Database };
 
@@ -81,6 +82,9 @@ officeHoursRoutes.post("/", sValidator("json", createOfficeHourSchema), async (c
         hostIcalUrl: body.icalUrl,
     });
 
+    // 初回同期を実行（数秒かかるが、作成直後の画面で確実に反映させるため待機する）
+    await syncOneOfficeHour(c.env, id);
+
     // 管理者セッション cookie をすぐ発行
     c.header(
         "Set-Cookie",
@@ -97,11 +101,17 @@ officeHoursRoutes.get("/:id", sValidator("param", officeHourIdParamSchema), asyn
     const db = createDb(c.env.DB);
     const svc = createOfficeHourService(db);
     const { id } = c.req.valid("param");
-    const view = await svc.getPublicView(id);
+    let view = await svc.getPublicView(id);
     if (!view) {
         const deleted = await svc.isDeleted(id);
         if (deleted) return c.json({ error: "この Office Hour は削除されました", deleted: true }, 410);
         return c.json({ error: "Office Hour not found" }, 404);
+    }
+
+    if (view.lastSyncAt === null) {
+        // まだ一度も同期されていない（Cron実行前など）場合は、オンデマンドで初回同期を実行
+        await syncOneOfficeHour(c.env, id);
+        view = (await svc.getPublicView(id))!;
     }
 
     const [busy, slotBookings] = await Promise.all([
@@ -121,18 +131,25 @@ officeHoursRoutes.get("/:id", sValidator("param", officeHourIdParamSchema), asyn
         bufferMin: view.bufferMin,
     });
 
-    // 各スロットの状態を組み立てる
-    const slotStates = slots.map((s) => {
-        const blocked = isSlotBlockedByBusy(s, busy);
+    // 各スロットの状態を組み立てる（過去・主催者の予定と重なるスロットは除外）
+    const now = Date.now();
+    const slotStates: {
+        startMs: number;
+        endMs: number;
+        taken: number;
+        remaining: number;
+    }[] = [];
+    for (const s of slots) {
+        if (s.startMs < now) continue; // 過去のスロットは非表示
+        if (isSlotBlockedByBusy(s, busy)) continue; // 予定が重なるスロットは非表示
         const taken = slotBookings.countBySlot.get(s.startMs) ?? 0;
-        return {
+        slotStates.push({
             startMs: s.startMs,
             endMs: s.endMs,
-            blocked,
             taken,
-            remaining: blocked ? 0 : Math.max(0, view.capacityPerSlot - taken),
-        };
-    });
+            remaining: Math.max(0, view.capacityPerSlot - taken),
+        });
+    }
 
     return c.json({
         officeHour: {
@@ -167,6 +184,11 @@ officeHoursRoutes.post(
 
         const oh = await svc.findById(id);
         if (!oh) return c.json({ error: "この Office Hour は削除されたか存在しません" }, 404);
+
+        // 過去のスロットは予約不可
+        if (body.slotStart < Date.now()) {
+            return c.json({ error: "過去の枠は予約できません" }, 409);
+        }
 
         // 主催者の busy と重なっていないか再確認（クライアントが古い状態を持っている可能性に備える）
         const busy = await svc.getHostBusy(id);

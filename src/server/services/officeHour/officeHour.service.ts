@@ -291,8 +291,9 @@ export class OfficeHourService {
             summary: e.summary ?? null,
             fetchedAt: now,
         }));
-        // D1 のリクエスト上限を考慮し、適度な chunk で insert
-        const CHUNK = 50;
+        // D1 のリクエスト上限（1クエリあたりバインドパラメータ最大100個）を考慮
+        // 1レコード7カラムなので、CHUNK=10 なら 70個 で安全に収まる
+        const CHUNK = 10;
         for (let i = 0; i < rows.length; i += CHUNK) {
             await this.db.insert(officeHourHostBusy).values(rows.slice(i, i + CHUNK));
         }

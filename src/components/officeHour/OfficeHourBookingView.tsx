@@ -12,7 +12,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, CheckCircle2, Lock, Users, Calendar, Sparkles, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, CheckCircle2, Users, Calendar, Sparkles, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser } from "@/hooks/useUser";
 import {
@@ -45,6 +45,7 @@ export function OfficeHourBookingView({ id }: { id: string }) {
     const [isLoading, setIsLoading] = React.useState(true);
     const [loadError, setLoadError] = React.useState<string | null>(null);
 
+    const [viewMode, setViewMode] = React.useState<"list" | "grid">("list");
     const [weekOffset, setWeekOffset] = React.useState(0);
     const [bookedSlotStart, setBookedSlotStart] = React.useState<number | null>(null);
 
@@ -144,9 +145,10 @@ export function OfficeHourBookingView({ id }: { id: string }) {
         for (const slot of data.slots) {
             if (slot.startMs < weekStartMs || slot.startMs >= weekEndMs) continue;
             const sJst = new Date(slot.startMs + 9 * 60 * 60_000);
-            const eJst = new Date(slot.endMs + 9 * 60 * 60_000);
             const sh = sJst.getUTCHours();
-            const eh = eJst.getUTCMinutes() > 0 ? eJst.getUTCHours() + 1 : eJst.getUTCHours();
+            const startMinutes = sh * 60 + sJst.getUTCMinutes();
+            const endMinutes = startMinutes + (slot.endMs - slot.startMs) / 60_000;
+            const eh = Math.ceil(endMinutes / 60);
             if (sh < minH) minH = sh;
             if (eh > maxH) maxH = eh;
         }
@@ -224,7 +226,7 @@ export function OfficeHourBookingView({ id }: { id: string }) {
 
     if (isLoading) {
         return (
-            <div className="flex items-center justify-center py-24 gap-2 text-muted-foreground">
+            <div className="flex items-center justify-center min-h-[50vh] gap-2 text-muted-foreground">
                 <Loader2 className="h-5 w-5 animate-spin" /> 読み込み中...
             </div>
         );
@@ -326,15 +328,14 @@ export function OfficeHourBookingView({ id }: { id: string }) {
                     )}
                 </div>
                 <div className="flex gap-2.5 text-[11px] text-muted-foreground ml-auto">
-                    <span className="inline-flex items-center gap-1">
-                        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-500/30 border border-emerald-500/50" /> 予約可
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-muted/50 border border-muted-foreground/30" /> 予約不可
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                        <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-500/30 border border-green-500/50" /> 予約済み
-                    </span>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-xs h-7"
+                        onClick={() => setViewMode(v => v === "list" ? "grid" : "list")}
+                    >
+                        {viewMode === "list" ? "グリッド表示" : "リスト表示"}
+                    </Button>
                 </div>
             </div>
 
@@ -343,14 +344,81 @@ export function OfficeHourBookingView({ id }: { id: string }) {
                 <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
                     現在予約可能な枠はありません。
                 </div>
+            ) : viewMode === "list" ? (
+                /* リスト表示 UI */
+                <div className="flex overflow-x-auto border rounded-md bg-background shadow-sm max-h-[70vh]">
+                    {days.map((d) => {
+                        const daySlots = slotsByDay.get(d.iso) ?? [];
+                        // 過去のスロットをフィルタリング
+                        const nowMs = Date.now();
+                        const futureSlots = daySlots.filter(s => s.startMs > nowMs);
+                        const openCount = futureSlots.filter((s) => s.remaining > 0).length;
+                        const isToday = d.iso === formatIsoDate(nowMs);
+
+                        return (
+                            <div key={d.iso} className={cn("flex-1 min-w-[120px] sm:min-w-[140px] flex flex-col border-r last:border-r-0", isToday && "bg-muted/10")}>
+                                <div className="p-2 text-center border-b bg-muted/30 sticky top-0 z-10 backdrop-blur-sm">
+                                    <div className={cn("text-sm font-medium", isToday && "text-primary")}>{d.label}</div>
+                                    <div className={cn("text-[10px] mt-0.5", openCount > 0 ? "text-emerald-600 dark:text-emerald-400 font-medium" : "text-muted-foreground")}>
+                                        {futureSlots.length > 0 ? `空き${openCount}` : "予定なし"}
+                                    </div>
+                                </div>
+                                <div className="p-2 flex flex-col gap-2 overflow-y-auto">
+                                    {futureSlots.length === 0 ? (
+                                        <div className="text-xs text-muted-foreground text-center py-6">-</div>
+                                    ) : (
+                                        futureSlots.map((slot) => {
+                                            const isMine = bookedSlotStart === slot.startMs;
+                                            const available = slot.remaining > 0 && !isMine;
+
+                                            let blockClass: string;
+                                            if (isMine) {
+                                                blockClass = "bg-green-500/10 border-green-500/50 text-green-700 dark:text-green-300";
+                                            } else if (slot.remaining <= 0) {
+                                                blockClass = "bg-muted/50 border-muted-foreground/20 text-muted-foreground";
+                                            } else {
+                                                blockClass = "bg-emerald-500/10 border-emerald-500/30 hover:bg-emerald-500/20 hover:border-emerald-500/50 cursor-pointer text-emerald-800 dark:text-emerald-200 transition-colors";
+                                            }
+
+                                            return (
+                                                <button
+                                                    key={slot.startMs}
+                                                    type="button"
+                                                    onClick={() => available && openBookingModal(slot)}
+                                                    disabled={!available}
+                                                    className={cn(
+                                                        "flex flex-col items-center justify-center p-2 rounded border text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                                        blockClass,
+                                                        !available && "cursor-default"
+                                                    )}
+                                                    aria-label={`${formatTime(slot.startMs)}〜${formatTime(slot.endMs)} ${isMine ? "予約済み" : slot.remaining <= 0 ? "満員" : `残り${slot.remaining}`}`}
+                                                >
+                                                    <span className="font-medium">
+                                                        {formatTime(slot.startMs)}
+                                                    </span>
+                                                    <span className="text-[10px] flex items-center gap-1 mt-0.5 opacity-80">
+                                                        {isMine && <CheckCircle2 className="w-3 h-3" />}
+                                                        {!isMine && slot.remaining <= 0 && <Users className="w-3 h-3" />}
+                                                        {isMine ? "予約済" : slot.remaining <= 0 ? "満員" : `残${slot.remaining}`}
+                                                    </span>
+                                                </button>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
             ) : (
+                /* グリッド表示 UI */
                 <div className="rounded-md border bg-card/20 flex flex-col" style={{ height: "calc(100vh - 220px)", minHeight: "600px" }}>
                     {/* 日付ヘッダー */}
                     <div className="grid grid-cols-[40px_repeat(7,minmax(0,1fr))] border-b bg-muted/20 shrink-0">
                         <div />
                         {days.map((d) => {
                             const daySlots = slotsByDay.get(d.iso) ?? [];
-                            const openCount = daySlots.filter((s) => !s.blocked && s.remaining > 0).length;
+                            const openCount = daySlots.filter((s) => s.remaining > 0).length;
                             return (
                                 <div key={d.iso} className="text-center py-1.5 border-l">
                                     <div className="text-xs font-medium">{d.label}</div>
@@ -398,23 +466,25 @@ export function OfficeHourBookingView({ id }: { id: string }) {
                                     ))}
                                     {/* スロットブロック */}
                                     {daySlots.map((slot) => {
-                                        const startPct = minToPct(relMinFromHour(slot.startMs, timelineStartHour), timelineHours);
-                                        const endPct = minToPct(relMinFromHour(slot.endMs, timelineStartHour), timelineHours);
+                                        // 過去のスロットをグリッドでは半透明にするか非表示にする（ここでは半透明にする）
+                                        const isPast = slot.startMs < Date.now();
+
+                                        const startMins = relMinFromHour(slot.startMs, timelineStartHour);
+                                        const endMins = startMins + (slot.endMs - slot.startMs) / 60_000;
+                                        const startPct = minToPct(startMins, timelineHours);
+                                        const endPct = minToPct(endMins, timelineHours);
                                         const topPct = Math.max(0, startPct);
                                         const bottomPct = Math.min(100, endPct);
                                         if (bottomPct <= 0 || topPct >= 100) return null;
 
                                         const isMine = bookedSlotStart === slot.startMs;
-                                        const available = !slot.blocked && slot.remaining > 0 && !isMine;
+                                        const available = slot.remaining > 0 && !isMine && !isPast;
 
                                         let blockClass: string;
                                         let icon: React.ReactNode = null;
                                         if (isMine) {
                                             blockClass = "bg-green-500/20 border-green-500/60 hover:bg-green-500/30";
                                             icon = <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400 shrink-0" />;
-                                        } else if (slot.blocked) {
-                                            blockClass = "bg-muted/30 border-muted-foreground/20 text-muted-foreground";
-                                            icon = <Lock className="h-3 w-3 shrink-0" />;
                                         } else if (slot.remaining <= 0) {
                                             blockClass = "bg-muted/30 border-muted-foreground/20 text-muted-foreground";
                                             icon = <Users className="h-3 w-3 shrink-0" />;
@@ -435,10 +505,11 @@ export function OfficeHourBookingView({ id }: { id: string }) {
                                                     "flex flex-col items-center justify-center gap-0.5",
                                                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                                     blockClass,
-                                                    !available && "cursor-default"
+                                                    !available && "cursor-default",
+                                                    isPast && "opacity-40 grayscale"
                                                 )}
                                                 style={{ top: `${topPct}%`, height: `${heightPct}%` }}
-                                                aria-label={`${formatTime(slot.startMs)}〜${formatTime(slot.endMs)} ${isMine ? "予約済み" : slot.blocked ? "予約不可" : slot.remaining <= 0 ? "満員" : `残り${slot.remaining}`}`}
+                                                aria-label={`${formatTime(slot.startMs)}〜${formatTime(slot.endMs)} ${isMine ? "予約済み" : slot.remaining <= 0 ? "満員" : `残り${slot.remaining}`}`}
                                             >
                                                 <span className="font-semibold leading-none truncate">
                                                     {formatTime(slot.startMs)}
@@ -446,7 +517,7 @@ export function OfficeHourBookingView({ id }: { id: string }) {
                                                 {heightPct > 5 && (
                                                     <span className="flex items-center gap-0.5 leading-none opacity-80">
                                                         {icon}
-                                                        {isMine ? "予約済" : slot.blocked ? "" : slot.remaining <= 0 ? "満員" : `残${slot.remaining}`}
+                                                        {isMine ? "予約済" : slot.remaining <= 0 ? "満員" : `残${slot.remaining}`}
                                                     </span>
                                                 )}
                                             </button>

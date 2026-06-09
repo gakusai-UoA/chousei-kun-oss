@@ -57,7 +57,6 @@ export type OfficeHourPublic = {
     slots: Array<{
         startMs: number;
         endMs: number;
-        blocked: boolean;
         taken: number;
         remaining: number;
     }>;
