@@ -8,17 +8,20 @@
  * `.open-next/worker.js` を生成するので、デプロイ手順は変わらない（このファイルから
  * import するだけ）。
  */
+// @ts-ignore: generated file
 import openNextWorker from "./.open-next/worker.js";
 import { syncAllActive } from "./src/server/cron/sync-host-busy";
 
 // Durable Object クラス類は OpenNext が同 worker から re-export している前提なので
 // type 抽出 + 再エクスポートが必要。OpenNext のテンプレ通り、wrangler の bundling 時に
 // `.open-next/worker.js` 側の export を引き継ぐ。
+// @ts-ignore: generated file
 export { DOQueueHandler, DOShardedTagCache, BucketCachePurge } from "./.open-next/worker.js";
 
 type Env = {
     DB: D1Database;
 };
+
 
 export default {
     fetch: openNextWorker.fetch,
