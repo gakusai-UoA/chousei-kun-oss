@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Check, X, Copy, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, X, Copy, ZoomIn, ZoomOut, AlertTriangle } from "lucide-react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 
@@ -568,6 +568,15 @@ export function PeriodSelector({
                                                 if (!info) return null;
 
                                                 const style = getBlockStyle(info.startMin, info.endMin);
+                                                const isConflict = busyPeriodIds.some(bp => {
+                                                    if (!bp.startsWith(dateStr)) return false;
+                                                    const [, bSlot] = bp.split("_");
+                                                    const bType = bSlot.startsWith("P") ? "P" : "H";
+                                                    const bId = parseInt(bSlot.replace(/[PH]/, ""));
+                                                    const bInfo = getSlotInfo(bType, bId);
+                                                    if (!bInfo) return false;
+                                                    return bInfo.startMin < info.endMin && bInfo.endMin > info.startMin;
+                                                });
 
                                                 return (
                                                     <div
@@ -576,16 +585,34 @@ export function PeriodSelector({
                                                             e.stopPropagation();
                                                             togglePeriod(dateStr, id, type);
                                                         }}
-                                                        className="absolute inset-x-1 rounded px-2 py-1 text-xs sm:text-xs font-medium border cursor-pointer
-                                                                   shadow-sm hover:shadow-md transition-all z-20 overflow-hidden
-                                                                   bg-primary text-primary-foreground border-primary"
-                                                        style={style}
+                                                        title={isConflict ? "既存の予定と重複しています" : undefined}
+                                                        className={cn(
+                                                            "absolute inset-x-1 rounded px-2 py-1 text-[10px] sm:text-xs font-medium cursor-pointer shadow-sm hover:shadow-md transition-all z-20 overflow-hidden",
+                                                            isConflict
+                                                                ? "bg-primary text-primary-foreground border-2 border-red-500 dark:border-red-400 ring-2 ring-red-500/40"
+                                                                : "bg-primary text-primary-foreground border border-primary"
+                                                        )}
+                                                        style={{
+                                                            ...style,
+                                                            ...(isConflict && {
+                                                                backgroundImage: "repeating-linear-gradient(45deg, rgba(220,38,38,0.65) 0 6px, transparent 6px 14px)",
+                                                            }),
+                                                        }}
                                                     >
                                                         <div className="flex justify-between items-start">
                                                             <span>{info.sub}</span>
-                                                            <X className="w-3 h-3 opacity-50 hover:opacity-100" />
+                                                            {isConflict ? (
+                                                                <AlertTriangle className="w-3 h-3 text-red-100 dark:text-red-200 drop-shadow" />
+                                                            ) : (
+                                                                <X className="w-3 h-3 opacity-50 hover:opacity-100" />
+                                                            )}
                                                         </div>
-                                                        <div className="font-bold">{info.label}</div>
+                                                        <div className="font-bold flex items-center gap-1">
+                                                            {info.label}
+                                                            {isConflict && (
+                                                                <span className="text-[9px] font-semibold uppercase tracking-tight bg-red-600 text-white px-1 rounded">重複</span>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 );
                                             })}
@@ -643,6 +670,7 @@ export function PeriodSelector({
                         空いている場所をクリックして時限を選択。時間指定は左のメニューから。
                         <span className="mx-2 inline-block w-3 h-3 bg-primary rounded align-middle"></span> 選択中
                         <span className="mx-2 inline-block w-3 h-3 bg-red-100 border border-red-200 dark:bg-red-900/20 rounded align-middle"></span> 予定あり
+                        <span className="mx-2 inline-block w-3 h-3 bg-primary border-2 border-red-500 rounded align-middle"></span> 重複
                     </div>
                     {/* Zoom Controls */}
                     <div className="flex items-center gap-1 bg-background border rounded-md p-0.5 shadow-sm shrink-0">
