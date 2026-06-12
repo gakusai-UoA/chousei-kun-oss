@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useMemo, type JSX, type ReactNode } from "react";
 import { loadDefaultJapaneseParser } from "budoux";
 
 const parser = loadDefaultJapaneseParser();
