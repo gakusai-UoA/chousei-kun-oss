@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { sValidator } from "@hono/standard-validator";
-import { eventsRoutes, googleRoutes, usersRoutes, aiRoutes, officeHoursRoutes, adminRoutes } from "./routes";
+import { eventsRoutes, googleRoutes, usersRoutes, officeHoursRoutes, adminRoutes } from "./routes";
 import { syncCalendarSchema, syncICalSchema } from "./schemas";
 import { CampusSquareService } from "@/lib/campus-square";
 import { parseICal } from "@/lib/ical";
@@ -16,7 +16,6 @@ export const apiApp = new Hono<{ Bindings: Bindings }>().basePath("/api");
 apiApp.route("/events", eventsRoutes);
 apiApp.route("/google", googleRoutes);
 apiApp.route("/users", usersRoutes);
-apiApp.route("/ai", aiRoutes);
 apiApp.route("/office-hours", officeHoursRoutes);
 apiApp.route("/admin", adminRoutes);
 

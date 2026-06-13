@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { siteConfig } from "@/config/site";
-import { Sparkles, Calendar, Zap, Layout, Bug, History } from "lucide-react";
+import { Calendar, Zap, Layout, Bug, History } from "lucide-react";
 import { budouxify } from "@/lib/budoux";
 
 export const metadata = {
@@ -11,13 +11,11 @@ export const metadata = {
 const releases = [
     {
         version: "v1.2.0 (2026-05-17)",
-        title: "AI日程調整アシスタント ＆ iCal連携の導入",
+        title: "iCal連携と UI 刷新",
         type: "major",
         highlights: [
-            { icon: Sparkles, text: "AI日程調整アシスタント (ベータ版): 自然言語で候補選択や出欠入力を自動化" },
             { icon: Calendar, text: "iCal (ICS) URLインポート: Googleカレンダーなどの外部カレンダーを直接同期" },
-            { icon: Zap, text: "爆速AIレスポンス: GLM-5.1 / DeepSeek V4 Flashモデルによる高速な応答" },
-            { icon: Layout, text: "UI/UX刷新: 右サイドペイン形式のAIチャット、時間ベースの正確なカレンダー描画" },
+            { icon: Layout, text: "UI/UX刷新: 時間ベースの正確なカレンダー描画" },
             { icon: Bug, text: "安定性向上: フック順序の最適化、JSONパースエラーの解消、Google認証フローの改善" }
         ]
     },

@@ -15,7 +15,6 @@ import dynamic from "next/dynamic";
 import { useUser } from "@/hooks/useUser";
 import { logActivity } from "@/hooks/useActivityLog";
 
-const AISchedulingAssistant = dynamic(() => import("@/components/AISchedulingAssistant"), { ssr: false });
 const CalendarImportMenu = dynamic(() => import("@/components/CalendarImportMenu"), { ssr: false });
 
 interface ResponseFormProps {
@@ -621,11 +620,10 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
     }
   };
 
-  const [isAIPaneOpen, setIsAIPaneOpen] = React.useState(false);
 
   return (
     <div className="w-full mt-6 animate-in fade-in slide-in-from-bottom-4 duration-700 flex overflow-hidden min-h-[600px]">
-      <div className={cn("flex-1 flex flex-col min-w-0 px-0 sm:px-2 lg:px-4 overflow-y-auto transition-all duration-300", isAIPaneOpen ? "lg:mr-0" : "")}>
+      <div className="flex-1 flex flex-col min-w-0 px-0 sm:px-2 lg:px-4 overflow-y-auto">
         <div className="mb-6">
           <h3 className="text-2xl font-bold">{participantId ? siteConfig.ui.responseEvent.titleEdit : siteConfig.ui.responseEvent.titleNew}</h3>
           <p className="text-muted-foreground mt-0.5">{participantId ? siteConfig.ui.responseEvent.descriptionEdit : siteConfig.ui.responseEvent.descriptionNew}</p>
@@ -696,27 +694,6 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
           </div>
         </div>
       </div>
-
-      <AISchedulingAssistant
-        mode="respond"
-        candidates={candidates}
-        currentSchedule={candidates.map((c, i) => `${c}:${availabilities[i]}`)}
-        onChange={(updated) => {
-          const newAvails = [...availabilities];
-          updated.forEach((item) => {
-            const [candidate, status] = item.split(":");
-            const idx = candidates.indexOf(candidate);
-            if (idx !== -1) {
-              const s = parseInt(status);
-              if (!isNaN(s)) newAvails[idx] = s;
-            }
-          });
-          setAvailabilities(newAvails);
-        }}
-        isOpen={isAIPaneOpen}
-        onOpen={() => setIsAIPaneOpen(true)}
-        onClose={() => setIsAIPaneOpen(false)}
-      />
 
       {/* Feedback Dialog */}
       <Dialog open={feedback.isOpen} onOpenChange={closeFeedback}>

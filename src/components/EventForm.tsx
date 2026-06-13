@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { PeriodSelector, CUSTOM_PERIODS, HOURLY_SLOTS } from "@/components/PeriodSelector";
-import { Loader2, Calendar as CalendarIcon, Check, Copy, ExternalLink, ArrowRight, ArrowLeft, Sparkles, X as XIcon } from "lucide-react";
+import { Loader2, Calendar as CalendarIcon, Check, Copy, ExternalLink, ArrowRight, X as XIcon } from "lucide-react";
 import Link from "next/link";
 import { siteConfig } from "@/config/site";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,6 @@ import {
 
 import dynamic from 'next/dynamic';
 
-const AISchedulingAssistant = dynamic(() => import('@/components/AISchedulingAssistant'), { ssr: false });
 const CalendarImportMenu = dynamic(() => import('@/components/CalendarImportMenu'), { ssr: false });
 
 /** カレンダー取り込み元の予定（iCal / Google など由来でフィールド名が揺れるため両対応） */
@@ -420,7 +419,6 @@ export function EventForm() {
         }
     };
 
-    const [isAIPaneOpen, setIsAIPaneOpen] = React.useState(false);
 
     if (createdEventId) {
         const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
@@ -485,7 +483,7 @@ export function EventForm() {
 
     return (
         <div className="w-full max-w-none mx-auto flex-1 min-h-0 flex overflow-hidden">
-            <div className={cn("flex-1 flex flex-col min-w-0 p-4 lg:p-6 transition-all duration-300", isAIPaneOpen ? "lg:mr-0" : "")}>
+            <div className="flex-1 flex flex-col min-w-0 p-4 lg:p-6">
                 <div className="mb-2 sm:mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center shrink-0 gap-4">
                     <div className="text-left flex items-center gap-4">
                         <div>
@@ -542,15 +540,6 @@ export function EventForm() {
                     </div>
                 </div>
             </div>
-
-            <AISchedulingAssistant 
-                currentSchedule={selectedPeriods}
-                onChange={setSelectedPeriods}
-                mode="create"
-                isOpen={isAIPaneOpen}
-                onOpen={() => setIsAIPaneOpen(true)}
-                onClose={() => setIsAIPaneOpen(false)}
-            />
 
             {/* Input Modal */}
             <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
