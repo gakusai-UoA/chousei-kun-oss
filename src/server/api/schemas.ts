@@ -27,6 +27,8 @@ export const createEventSchema = z.object({
     description: z.string().max(2000).optional().default(""),
     candidates: candidatesSchema,
     adminPassword: z.string().min(8).max(256),
+    /** 任意: デバイス localStorage の userId。マイページ一覧で使う。 */
+    creatorUserId: z.string().uuid().optional(),
 });
 
 export const eventIdParamSchema = z.object({

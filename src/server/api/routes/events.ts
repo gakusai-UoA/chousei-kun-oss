@@ -87,7 +87,7 @@ async function replaceAvailabilities(
 
 eventsRoutes.post("/", sValidator("json", createEventSchema), async (c) => {
     const db = createDb(c.env.DB);
-    const { title, description, candidates, adminPassword } = c.req.valid("json");
+    const { title, description, candidates, adminPassword, creatorUserId } = c.req.valid("json");
     const id = crypto.randomUUID();
     const createdAt = Date.now();
     const adminPasswordHash = await createPasswordHash(adminPassword);
@@ -101,9 +101,31 @@ eventsRoutes.post("/", sValidator("json", createEventSchema), async (c) => {
         createdAt,
         adminPasswordHash,
         adminAccessToken,
+        createdByUserId: creatorUserId ?? null,
     });
 
     return c.json({ id }, 201);
+});
+
+/**
+ * デバイスに保存された userId を持つ作成者向けの、自分が作ったイベント一覧。
+ * 認証は持たず userId をそのままキーにする（同 userId を持つ別デバイスからも
+ * 同じ一覧が見える設計）。回答内容など参加者の PII は含めない。
+ */
+eventsRoutes.get("/by-creator/:userId", async (c) => {
+    const userId = c.req.param("userId");
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+        return c.json({ error: "Invalid userId" }, 400);
+    }
+    const db = createDb(c.env.DB);
+    const rows = await db.select({
+        id: events.id,
+        title: events.title,
+        description: events.description,
+        createdAt: events.createdAt,
+        confirmedCandidateIdx: events.confirmedCandidateIdx,
+    }).from(events).where(eq(events.createdByUserId, userId));
+    return c.json({ items: rows.sort((a, b) => b.createdAt - a.createdAt) });
 });
 
 eventsRoutes.get("/:id", sValidator("param", eventIdParamSchema), async (c) => {

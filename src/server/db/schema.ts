@@ -24,6 +24,8 @@ export const events = sqliteTable("events", {
     adminPasswordHash: text("admin_password_hash"),
     adminAccessToken: text("admin_access_token"),
     confirmedCandidateIdx: integer("confirmed_candidate_idx"),
+    /** デバイス（localStorage の userId）と紐付ける作成者識別子。任意。 */
+    createdByUserId: text("created_by_user_id"),
 });
 
 /**

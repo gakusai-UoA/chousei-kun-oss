@@ -66,6 +66,9 @@ export function PeriodSelector({
     // Hourly range picker state (defaults: 9:00 - 17:00)
     const [rangeStart, setRangeStart] = React.useState("09:00");
     const [rangeEnd, setRangeEnd] = React.useState("17:00");
+    // 繰り返し追加: focusedDate の選択を N 回先まで同曜日に展開する
+    const [recurrencePeriod, setRecurrencePeriod] = React.useState<"weekly" | "biweekly" | "monthly">("weekly");
+    const [recurrenceCount, setRecurrenceCount] = React.useState(4);
 
     // Synchronize viewDates with selectedPeriods (for AI additions)
     React.useEffect(() => {
@@ -262,6 +265,45 @@ export function PeriodSelector({
         }
     };
 
+    /**
+     * focusedDate に現在選択されているスロット（_P / _H）を、
+     * 「毎週／隔週／月次同曜日」のパターンで未来方向に N 回複製する。
+     * すでに同じキーが存在する場合は重複させない。
+     */
+    const applyRecurrence = () => {
+        if (!focusedDate) return;
+        const srcDateStr = format(focusedDate, "yyyy-MM-dd");
+        const sourceSlots = selectedPeriods
+            .filter((p) => p.startsWith(srcDateStr))
+            .map((p) => p.split("_")[1]); // 例: "P3", "H10"
+        if (sourceSlots.length === 0) return;
+
+        const stepDays = recurrencePeriod === "weekly" ? 7 : recurrencePeriod === "biweekly" ? 14 : null;
+        const newViewDates = [...viewDates];
+        const next = [...selectedPeriods];
+
+        for (let i = 1; i <= recurrenceCount; i++) {
+            const target = new Date(focusedDate);
+            if (stepDays !== null) {
+                target.setDate(target.getDate() + stepDays * i);
+            } else {
+                // monthly: 同じ曜日週次でない、同じ日付（例: 毎月13日）
+                target.setMonth(target.getMonth() + i);
+            }
+            const dateStr = format(target, "yyyy-MM-dd");
+            if (!newViewDates.some((d) => format(d, "yyyy-MM-dd") === dateStr)) {
+                newViewDates.push(target);
+            }
+            sourceSlots.forEach((slot) => {
+                const key = `${dateStr}_${slot}`;
+                if (!next.includes(key)) next.push(key);
+            });
+        }
+        newViewDates.sort((a, b) => a.getTime() - b.getTime());
+        setViewDates(newViewDates);
+        onChange(next);
+    };
+
     const renderTimeAxis = () => {
         const hours = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => START_HOUR + i);
         return (
@@ -418,6 +460,44 @@ export function PeriodSelector({
                                     <p className="text-[10px] text-muted-foreground mt-1.5 leading-snug">
                                         個別の時間は右のタイムラインをクリックで切替できます。
                                     </p>
+                                </div>
+
+                                <div className="shrink-0 border-t pt-3">
+                                    <h4 className="text-[10px] font-semibold text-muted-foreground mb-1 uppercase tracking-tight">繰り返し適用</h4>
+                                    <p className="text-[10px] text-muted-foreground mb-1.5 leading-snug">
+                                        この日に選んだ時間帯を、未来の同曜日・同日付に複製します。
+                                    </p>
+                                    <div className="flex items-center gap-1.5">
+                                        <select
+                                            value={recurrencePeriod}
+                                            onChange={(e) => setRecurrencePeriod(e.target.value as "weekly" | "biweekly" | "monthly")}
+                                            className="h-8 rounded-md border bg-background px-2 text-xs"
+                                            aria-label="繰り返しパターン"
+                                        >
+                                            <option value="weekly">毎週</option>
+                                            <option value="biweekly">隔週</option>
+                                            <option value="monthly">月次</option>
+                                        </select>
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            max={52}
+                                            value={recurrenceCount}
+                                            onChange={(e) => setRecurrenceCount(Math.max(1, Math.min(52, Number(e.target.value) || 1)))}
+                                            className="h-8 w-16 text-xs tabular-nums"
+                                            aria-label="繰り返し回数"
+                                        />
+                                        <span className="text-xs text-muted-foreground">回</span>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="default"
+                                        size="sm"
+                                        className="h-7 px-2 text-[10px] mt-1.5 w-full"
+                                        onClick={applyRecurrence}
+                                    >
+                                        繰り返し追加
+                                    </Button>
                                 </div>
                             </>
                         )}

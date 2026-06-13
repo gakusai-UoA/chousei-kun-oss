@@ -393,10 +393,13 @@ export function EventForm() {
                 return getStartTime(slotA).localeCompare(getStartTime(slotB));
             });
 
+            // 「自分が作ったイベント一覧」(/me) で再表示できるよう、
+            // localStorage の userId を作成者として送る。
+            const creatorUserId = typeof window !== "undefined" ? localStorage.getItem("chosei_user_id") || undefined : undefined;
             const response = await fetch("/api/events", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title, description, candidates: sortedCandidates, adminPassword }),
+                body: JSON.stringify({ title, description, candidates: sortedCandidates, adminPassword, creatorUserId }),
             });
 
             if (!response.ok) throw new Error("イベントの作成に失敗しました");
