@@ -4,6 +4,7 @@ import { siteConfig } from "@/config/site";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { FeedbackButton } from "@/components/FeedbackButton";
+import { WanaInit } from "@/components/WanaInit";
 
 // デジタル庁デザインシステム(DADS)準拠: 本文書体は Noto Sans JP
 const notoSansJP = Noto_Sans_JP({
@@ -47,6 +48,7 @@ export default function RootLayout({
 					enableSystem
 					disableTransitionOnChange
 				>
+					<WanaInit />
 					{children}
 					<FeedbackButton />
 				</ThemeProvider>

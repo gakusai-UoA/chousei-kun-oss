@@ -5,6 +5,7 @@ import { syncCalendarSchema, syncICalSchema } from "./schemas";
 import { CampusSquareService } from "@/lib/campus-square";
 import { parseICal } from "@/lib/ical";
 import { safeFetchText } from "@/lib/safe-fetch";
+import { captureException } from "@/lib/wana";
 
 type Bindings = {
     DB: D1Database;
@@ -41,7 +42,39 @@ apiApp.post("/sync-ical", sValidator("json", syncICalSchema), async (c) => {
     }
 });
 
+/**
+ * dev 限定の Wana 疎通テスト。バックエンド→Wana の送信経路を実際に叩き、
+ * 結果（ok / eventId / status）をそのまま返す。フロントの dev テストページから
+ * 呼んで「ちゃんと流れているか」を確認するために使う。本番では 404。
+ */
+apiApp.get("/wana/selftest", async (c) => {
+    if (process.env.NODE_ENV === "production") {
+        return c.json({ error: "Not found" }, 404);
+    }
+    const result = await captureException(
+        new Error("Wana backend self-test (intentional, not a real error)"),
+        {
+            level: "info",
+            tags: { source: "selftest-backend" },
+            request: { method: c.req.method, url: c.req.url },
+        }
+    );
+    return c.json(result, result.ok ? 200 : 502);
+});
+
 apiApp.onError((error, c) => {
     console.error("[API Error]", error);
+    // Wana へは fire-and-forget。エラー応答をブロックしない。
+    const report = captureException(error, {
+        tags: { source: "api" },
+        request: { method: c.req.method, url: c.req.url },
+    });
+    try {
+        // Workers では応答後も送信を完了させる。
+        c.executionCtx.waitUntil(report);
+    } catch {
+        // dev / Node ランタイムには executionCtx が無い場合がある。浮かせて実行。
+        void report;
+    }
     return c.json({ error: "Internal Server Error" }, 500);
 });

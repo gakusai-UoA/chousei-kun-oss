@@ -26,6 +26,7 @@ import { enforceRateLimit, clientIp, type RateLimitBinding } from "../rate-limit
 import { safeJsonParse } from "@/lib/safe-json";
 import { redactPii } from "@/lib/redact";
 import { encryptPii, decryptPii } from "@/lib/pii-crypto";
+import { captureException } from "@/lib/wana";
 
 type Bindings = {
     DB: D1Database;
@@ -456,6 +457,15 @@ eventsRoutes.post(
         }
         catch (e) {
             console.error("[duplicate-event] error:", e);
+            const report = captureException(e, {
+                tags: { source: "duplicate-event" },
+                request: { method: c.req.method, url: c.req.url },
+            });
+            try {
+                c.executionCtx.waitUntil(report);
+            } catch {
+                void report;
+            }
             return c.json({ error: "Internal Server Error" }, 500);
         }
     }
