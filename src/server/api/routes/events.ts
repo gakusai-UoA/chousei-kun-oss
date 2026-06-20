@@ -416,39 +416,48 @@ eventsRoutes.post(
     "/:id/admin/duplicate",
     sValidator("param", eventIdParamSchema),
     async (c) => {
-        const db = createDb(c.env.DB);
-        const { id } = c.req.valid("param");
-        const auth = await verifyAdminSession(c, id);
-        if (!auth.authorized) return c.json({ error: auth.error }, 401);
+        try {
+            const db = createDb(c.env.DB);
+            const { id } = c.req.valid("param");
+            const auth = await verifyAdminSession(c, id);
+            if (!auth.authorized) return c.json({ error: auth.error }, 401);
 
-        const src = await db.query.events.findFirst({
-            where: eq(events.id, id),
-            columns: {
-                title: true,
-                description: true,
-                candidates: true,
-                adminPasswordHash: true,
-                adminAccessToken: true,
-            },
-        });
-        if (!src) return c.json({ error: "Event not found" }, 404);
+            const src = await db.query.events.findFirst({
+                where: eq(events.id, id),
+                columns: {
+                    title: true,
+                    description: true,
+                    candidates: true,
+                    adminPasswordHash: true,
+                    adminAccessToken: true,
+                    createdByUserId: true,
+                },
+            });
+            if (!src) return c.json({ error: "Event not found" }, 404);
 
-        const newId = crypto.randomUUID();
-        await db.insert(events).values({
-            id: newId,
-            title: `${src.title}（コピー）`,
-            description: src.description,
-            candidates: src.candidates,
-            createdAt: Date.now(),
-            adminPasswordHash: src.adminPasswordHash,
-            adminAccessToken: src.adminAccessToken,
-        });
-
-        c.header(
-            "Set-Cookie",
-            `chousei_admin_${newId}=${src.adminAccessToken}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=2592000`
-        );
-        return c.json({ id: newId }, 201);
+            const newId = crypto.randomUUID();
+            await db.insert(events).values({
+                id: newId,
+                title: `${src.title}（コピー）`,
+                description: src.description,
+                candidates: src.candidates,
+                createdAt: Date.now(),
+                adminPasswordHash: src.adminPasswordHash,
+                adminAccessToken: src.adminAccessToken,
+                createdByUserId: src.createdByUserId,
+            });
+            
+            c.header(
+                "Set-Cookie",
+                `chousei_admin_${newId}=${src.adminAccessToken}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=2592000`
+            );
+            console.log(`[duplicate-event] duplicated event ${id} -> ${newId}`);
+            return c.json({ id: newId }, 201);
+        }
+        catch (e) {
+            console.error("[duplicate-event] error:", e);
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
     }
 );
 
