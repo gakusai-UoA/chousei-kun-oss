@@ -21,8 +21,8 @@ export type Lane = {
     segments: Segment[];
 };
 
-const PX_PER_MIN = 1.4;
-const ROW_H = 44;
+const PX_PER_MIN = 2;
+const ROW_H = 56;
 const LABEL_W = 180;
 
 let counter = 0;
@@ -228,31 +228,67 @@ export function ShiftLaneGantt({
                                         const left = (s.startMin - axisStartMin) * PX_PER_MIN;
                                         const width = (s.endMin - s.startMin) * PX_PER_MIN;
                                         const bad = overlapIds.has(s.id);
+                                        const ac = assignedCount?.(s.id);
+                                        // 割当状況で色分け（未割当=赤 / 一部=青 / 定員ちょうど=緑 / 超過=黄）。
+                                        const status = bad
+                                            ? "bad"
+                                            : ac == null
+                                              ? "plain"
+                                              : ac > s.capacity
+                                                ? "over"
+                                                : ac === s.capacity
+                                                  ? "full"
+                                                  : ac === 0
+                                                    ? "empty"
+                                                    : "partial";
+                                        const tone = {
+                                            bad: "border-destructive bg-destructive/15 text-destructive",
+                                            over: "border-amber-500 bg-amber-400/30 text-amber-900",
+                                            full: "border-emerald-500 bg-emerald-500/20 text-emerald-900",
+                                            empty: "border-rose-300 bg-rose-50 text-rose-700",
+                                            partial: "border-primary bg-primary/15 text-foreground",
+                                            plain: "border-primary/50 bg-primary/15 text-foreground",
+                                        }[status];
+                                        const handle = bad
+                                            ? "bg-destructive/40"
+                                            : status === "full"
+                                              ? "bg-emerald-500/50"
+                                              : status === "empty"
+                                                ? "bg-rose-300"
+                                                : status === "over"
+                                                  ? "bg-amber-500/50"
+                                                  : "bg-primary/40";
                                         return (
                                             <div
                                                 key={s.id}
                                                 onPointerDown={(e) => beginDrag(e, lane.laneId, s.id, "move")}
                                                 className={cn(
-                                                    "group absolute top-1.5 flex cursor-grab touch-none select-none items-center justify-between rounded-md border px-1 text-[11px] shadow-sm",
-                                                    bad
-                                                        ? "border-destructive/60 bg-destructive/15"
-                                                        : "border-primary/50 bg-primary/15 hover:bg-primary/25"
+                                                    "group absolute top-1.5 flex cursor-grab touch-none select-none items-stretch overflow-hidden rounded-md border shadow-sm",
+                                                    tone
                                                 )}
-                                                style={{ left, width, height: ROW_H - 12 }}
+                                                style={{ left, width, height: ROW_H - 14 }}
+                                                title={`${formatMinutes(s.startMin)}–${formatMinutes(s.endMin)}${
+                                                    ac != null ? ` / ${ac}人 (定員${s.capacity})` : ""
+                                                }`}
                                             >
                                                 <span
                                                     onPointerDown={(e) => beginDrag(e, lane.laneId, s.id, "start")}
-                                                    className="h-full w-1.5 shrink-0 cursor-ew-resize rounded-l bg-primary/50"
+                                                    className={cn("w-1.5 shrink-0 cursor-ew-resize", handle)}
                                                 />
-                                                <span className="pointer-events-none flex-1 truncate px-0.5 text-center">
-                                                    {formatMinutes(s.startMin)}–{formatMinutes(s.endMin)}
-                                                    <span className="ml-1 text-muted-foreground">
-                                                        {assignedCount ? `${assignedCount(s.id)}/${s.capacity}` : `×${s.capacity}`}
+                                                <span className="pointer-events-none flex flex-1 flex-col justify-center overflow-hidden px-1 text-center leading-tight">
+                                                    <span className="truncate text-[11px] font-medium">
+                                                        {formatMinutes(s.startMin)}–{formatMinutes(s.endMin)}
                                                     </span>
+                                                    {ac != null && (
+                                                        <span className="flex items-center justify-center gap-0.5 text-[11px] font-semibold">
+                                                            <Users className="size-3" />
+                                                            {ac}/{s.capacity}
+                                                        </span>
+                                                    )}
                                                 </span>
                                                 <span
                                                     onPointerDown={(e) => beginDrag(e, lane.laneId, s.id, "end")}
-                                                    className="h-full w-1.5 shrink-0 cursor-ew-resize rounded-r bg-primary/50"
+                                                    className={cn("w-1.5 shrink-0 cursor-ew-resize", handle)}
                                                 />
                                             </div>
                                         );

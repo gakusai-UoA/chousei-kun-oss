@@ -357,6 +357,14 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
         setDirty(true);
     };
 
+    // 絶対 ms を「(日) HH:MM」表示に（警告メッセージ用）。
+    const fmtAbs = (ms: number) => {
+        const di = dayIndexOf(ms, board.startDate);
+        const mid = board.startDate + di * DAY_MS;
+        const t = formatMinutes(msToDayMin(ms, mid));
+        return days.length > 1 ? `${formatDay(days[di])} ${t}` : t;
+    };
+
     // 警告（時間重複の二重割当・NG時間帯への割当）。
     const overlapWarnings: string[] = [];
     const ngWarnings: string[] = [];
@@ -364,11 +372,16 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
         const segs = (memberSegs.get(m.id) ?? []).map((id) => ({ id, info: segInfo.get(id)! })).filter((x) => x.info);
         segs.sort((a, b) => a.info.startsAt - b.info.startsAt);
         for (let i = 0; i < segs.length; i++) {
-            if (slotIsNg({ startsAt: segs[i].info.startsAt, endsAt: segs[i].info.endsAt }, m.unavailableRanges))
-                ngWarnings.push(`${m.name}: NG時間帯に割当（${segs[i].info.role}）`);
-            for (let j = i + 1; j < segs.length; j++)
-                if (rangesOverlap(segs[i].info.startsAt, segs[i].info.endsAt, segs[j].info.startsAt, segs[j].info.endsAt))
-                    overlapWarnings.push(`${m.name}: 時間が重なる割当（${segs[i].info.role} / ${segs[j].info.role}）`);
+            const A = segs[i].info;
+            if (slotIsNg({ startsAt: A.startsAt, endsAt: A.endsAt }, m.unavailableRanges))
+                ngWarnings.push(`${m.name}: NG時間帯に割当（${A.role} ${fmtAbs(A.startsAt)}）`);
+            for (let j = i + 1; j < segs.length; j++) {
+                const B = segs[j].info;
+                if (rangesOverlap(A.startsAt, A.endsAt, B.startsAt, B.endsAt))
+                    overlapWarnings.push(
+                        `${m.name}: 時間が重複（${A.role} ${fmtAbs(A.startsAt)} / ${B.role} ${fmtAbs(B.startsAt)}）`
+                    );
+            }
         }
     }
 
