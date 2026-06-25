@@ -160,7 +160,7 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                     <Input
                         value={title}
                         onChange={(e) => setTitle(e.target.value)}
-                        placeholder="例: 技大祭 前日準備シフト"
+                        placeholder="例: 前日準備シフト"
                         maxLength={200}
                     />
                 </div>
