@@ -37,7 +37,6 @@ export function ShiftEditView({ boardId }: { boardId: string }) {
                 dayStartMin: view.board.dayStartMin,
                 dayEndMin: view.board.dayEndMin,
                 submissionDeadline: view.board.submissionDeadline,
-                slots: view.slots,
             });
             setPhase("ready");
         } catch {

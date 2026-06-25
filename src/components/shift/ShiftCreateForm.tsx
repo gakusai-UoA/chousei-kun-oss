@@ -8,16 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, AlertCircle, CalendarClock } from "lucide-react";
 import { useUser } from "@/hooks/useUser";
 import { parseDateInput, formatIsoDate } from "@/lib/officeHour";
-import {
-    DAY_MS,
-    boardDays,
-    dayIndexOf,
-    dayMinToMs,
-    msToDayMin,
-    formatMinutes,
-    parseHm,
-} from "@/lib/shift";
-import { ShiftSlotEditor, type DraftSlot } from "./ShiftSlotEditor";
+import { formatMinutes, parseHm } from "@/lib/shift";
 
 export type ShiftEditData = {
     id: string;
@@ -28,18 +19,7 @@ export type ShiftEditData = {
     dayStartMin: number;
     dayEndMin: number;
     submissionDeadline: number | null;
-    slots: {
-        id: string;
-        startsAt: number;
-        endsAt: number;
-        role: string;
-        place: string | null;
-        capacity: number;
-        sortOrder: number;
-    }[];
 };
-
-let editKeyCounter = 0;
 
 export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {}) {
     const isEdit = !!editData;
@@ -53,37 +33,6 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
     const [dayStartMin, setDayStartMin] = React.useState(editData?.dayStartMin ?? 9 * 60);
     const [dayEndMin, setDayEndMin] = React.useState(editData?.dayEndMin ?? 18 * 60);
     const [adminPassword, setAdminPassword] = React.useState("");
-
-    const startDate = parseDateInput(startStr);
-    const endDate = parseDateInput(endStr);
-    const days =
-        startDate !== null && endDate !== null && endDate >= startDate
-            ? boardDays({ startDate, endDate })
-            : [];
-
-    const [slots, setSlots] = React.useState<DraftSlot[]>(() => {
-        if (editData) {
-            return editData.slots
-                .slice()
-                .sort((a, b) => a.sortOrder - b.sortOrder || a.startsAt - b.startsAt)
-                .map((s) => {
-                    editKeyCounter += 1;
-                    const di = dayIndexOf(s.startsAt, editData.startDate);
-                    const mid = editData.startDate + di * DAY_MS;
-                    return {
-                        key: `edit-${editKeyCounter}`,
-                        id: s.id,
-                        dayIndex: di,
-                        startMin: msToDayMin(s.startsAt, mid),
-                        endMin: msToDayMin(s.endsAt, mid),
-                        role: s.role,
-                        place: s.place ?? "",
-                        capacity: s.capacity,
-                    } as DraftSlot;
-                });
-        }
-        return [];
-    });
 
     const [submitting, setSubmitting] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
@@ -101,35 +50,15 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
         setError(null);
         const trimmedTitle = title.trim();
         if (!trimmedTitle) return setError("タイトルを入力してください。");
+        const startDate = parseDateInput(startStr);
+        const endDate = parseDateInput(endStr);
         if (startDate === null || endDate === null) return setError("対象期間（開始日・終了日）を設定してください。");
         if (endDate < startDate) return setError("終了日は開始日以降にしてください。");
         if (dayEndMin <= dayStartMin) return setError("収集時間帯の終了は開始より後にしてください。");
         if (!isEdit && adminPassword.length < 8)
             return setError("管理パスワードは 8 文字以上で設定してください。");
 
-        const validSlots = slots.filter((s) => s.dayIndex < days.length && s.role.trim() !== "");
-        const payloadSlots = validSlots.map((s, i) => {
-            const mid = days[s.dayIndex];
-            return {
-                ...(s.id ? { id: s.id } : {}),
-                startsAt: dayMinToMs(mid, s.startMin),
-                endsAt: dayMinToMs(mid, s.endMin),
-                role: s.role.trim(),
-                place: s.place.trim(),
-                capacity: s.capacity,
-                sortOrder: i,
-            };
-        });
-
-        const common = {
-            title: trimmedTitle,
-            description,
-            startDate,
-            endDate,
-            dayStartMin,
-            dayEndMin,
-            slots: payloadSlots,
-        };
+        const common = { title: trimmedTitle, description, startDate, endDate, dayStartMin, dayEndMin };
 
         setSubmitting(true);
         try {
@@ -164,7 +93,7 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
     };
 
     return (
-        <div className="w-full space-y-6 px-6 py-10 lg:px-12">
+        <div className="mx-auto w-full max-w-3xl space-y-6 px-6 py-10">
             <div className="space-y-1">
                 <h1 className="flex items-center gap-2 text-2xl font-bold">
                     <CalendarClock className="size-6 text-primary" />
@@ -172,7 +101,7 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                 </h1>
                 <p className="text-sm text-muted-foreground">
                     対象期間と「各日の収集時間帯」を決めると、メンバーはその範囲で「出られない時間帯」を申告します。
-                    シフト枠は今作っても、集計時に追加してもかまいません。
+                    シフト枠（役割・時間区分）は作成後の管理画面で組み立てます。
                 </p>
             </div>
 
@@ -184,8 +113,8 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
             )}
 
             <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-                    <div className="space-y-1.5 lg:col-span-2">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div className="space-y-1.5">
                         <label className="text-sm font-medium">タイトル</label>
                         <Input
                             value={title}
@@ -195,7 +124,7 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                         />
                     </div>
                     {!isEdit && (
-                        <div className="space-y-1.5 lg:col-span-2">
+                        <div className="space-y-1.5">
                             <label className="text-sm font-medium">管理パスワード（8文字以上）</label>
                             <Input
                                 type="password"
@@ -247,26 +176,12 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                         maxLength={2000}
                     />
                 </div>
-
-                <div className="space-y-2">
-                    <label className="text-sm font-medium">シフト枠（任意・集計時に追加も可）</label>
-                    <p className="text-xs text-muted-foreground">
-                        バー中央のドラッグで移動、左右端のドラッグで開始・終了を調整できます。
-                    </p>
-                    <ShiftSlotEditor
-                        days={days}
-                        dayStartMin={dayStartMin}
-                        dayEndMin={dayEndMin}
-                        slots={slots}
-                        onChange={setSlots}
-                    />
-                </div>
             </div>
 
             <div className="flex justify-end gap-2">
                 <Button onClick={handleSubmit} disabled={submitting} className="gap-2">
                     {submitting && <Loader2 className="size-4 animate-spin" />}
-                    {isEdit ? "更新する" : "作成する"}
+                    {isEdit ? "更新する" : "作成して枠を組む"}
                 </Button>
             </div>
         </div>
