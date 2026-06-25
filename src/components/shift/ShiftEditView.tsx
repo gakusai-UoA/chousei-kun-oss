@@ -32,7 +32,10 @@ export function ShiftEditView({ boardId }: { boardId: string }) {
                 id: view.board.id,
                 title: view.board.title,
                 description: view.board.description,
-                date: view.board.date,
+                startDate: view.board.startDate,
+                endDate: view.board.endDate,
+                dayStartMin: view.board.dayStartMin,
+                dayEndMin: view.board.dayEndMin,
                 submissionDeadline: view.board.submissionDeadline,
                 slots: view.slots,
             });

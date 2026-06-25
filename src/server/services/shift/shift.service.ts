@@ -4,9 +4,24 @@ import {
     shiftBoards,
     shiftSlots,
     shiftMembers,
-    shiftUnavailabilities,
+    shiftUnavailableRanges,
     shiftAssignments,
 } from "@/server/db/schema";
+
+export interface TimeRange {
+    startsAt: number;
+    endsAt: number;
+}
+
+/** 2 つの時間レンジが重なるか。 */
+function overlaps(aS: number, aE: number, bS: number, bE: number): boolean {
+    return aS < bE && bS < aE;
+}
+
+/** 枠が本人の NG レンジのいずれかと重なる = その枠は NG。 */
+function slotIsNg(slot: { startsAt: number; endsAt: number }, ranges: TimeRange[]): boolean {
+    return ranges.some((r) => overlaps(slot.startsAt, slot.endsAt, r.startsAt, r.endsAt));
+}
 import { createPasswordHash } from "@/lib/admin-auth";
 import { encryptPii, decryptPii } from "@/lib/pii-crypto";
 
@@ -23,7 +38,10 @@ export interface ShiftSlotInput {
 export interface CreateShiftBoardInput {
     title: string;
     description?: string;
-    date: number;
+    startDate: number;
+    endDate: number;
+    dayStartMin: number;
+    dayEndMin: number;
     submissionDeadline?: number | null;
     slots: ShiftSlotInput[];
     adminPassword: string;
@@ -58,7 +76,10 @@ export class ShiftService {
             id,
             title: input.title,
             description: input.description ?? null,
-            date: input.date,
+            startDate: input.startDate,
+            endDate: input.endDate,
+            dayStartMin: input.dayStartMin,
+            dayEndMin: input.dayEndMin,
             status: "collecting",
             submissionDeadline: input.submissionDeadline ?? null,
             adminPasswordHash,
@@ -139,16 +160,24 @@ export class ShiftService {
         }
 
         return {
-            board: {
-                id: board.id,
-                title: board.title,
-                description: board.description,
-                date: board.date,
-                status: board.status,
-                submissionDeadline: board.submissionDeadline,
-            },
+            board: this.toBoardMeta(board),
             slots,
             assignments,
+        };
+    }
+
+    /** board 行から公開メタ情報を組み立てる（PII なし）。 */
+    toBoardMeta(board: typeof shiftBoards.$inferSelect) {
+        return {
+            id: board.id,
+            title: board.title,
+            description: board.description,
+            startDate: board.startDate,
+            endDate: board.endDate,
+            dayStartMin: board.dayStartMin,
+            dayEndMin: board.dayEndMin,
+            status: board.status as "collecting" | "published",
+            submissionDeadline: board.submissionDeadline,
         };
     }
 
@@ -202,7 +231,7 @@ export class ShiftService {
         userId?: string;
         name: string;
         comment?: string;
-        unavailableSlotIds: string[];
+        unavailableRanges: TimeRange[];
     }): Promise<{ memberId: string }> {
         const encName = (await encryptPii(input.name))!;
         const encComment = await encryptPii(input.comment ?? null);
@@ -232,19 +261,21 @@ export class ShiftService {
             });
         }
 
-        // board に属する有効な slotId だけに絞る。
-        const validSlotIds = new Set((await this.getSlots(input.boardId)).map((s) => s.id));
-        const slotIds = [...new Set(input.unavailableSlotIds)].filter((sid) => validSlotIds.has(sid));
-
-        // NG をまるごと置き換える（DELETE → INSERT）。
+        // NG 時間レンジをまるごと置き換える（DELETE → INSERT）。
         await this.db
-            .delete(shiftUnavailabilities)
-            .where(eq(shiftUnavailabilities.memberId, memberId));
-        if (slotIds.length > 0) {
-            const rows = slotIds.map((slotId) => ({ memberId, slotId }));
-            const CHUNK = 40;
+            .delete(shiftUnavailableRanges)
+            .where(eq(shiftUnavailableRanges.memberId, memberId));
+        const ranges = input.unavailableRanges.filter((r) => r.endsAt > r.startsAt);
+        if (ranges.length > 0) {
+            const rows = ranges.map((r) => ({
+                id: crypto.randomUUID(),
+                memberId,
+                startsAt: r.startsAt,
+                endsAt: r.endsAt,
+            }));
+            const CHUNK = 25;
             for (let i = 0; i < rows.length; i += CHUNK) {
-                await this.db.insert(shiftUnavailabilities).values(rows.slice(i, i + CHUNK));
+                await this.db.insert(shiftUnavailableRanges).values(rows.slice(i, i + CHUNK));
             }
         }
 
@@ -257,11 +288,14 @@ export class ShiftService {
             where: and(eq(shiftMembers.id, memberId), eq(shiftMembers.boardId, boardId)),
         });
         if (!member) return null;
-        const [ng, assigned] = await Promise.all([
+        const [ranges, assigned] = await Promise.all([
             this.db
-                .select({ slotId: shiftUnavailabilities.slotId })
-                .from(shiftUnavailabilities)
-                .where(eq(shiftUnavailabilities.memberId, memberId)),
+                .select({
+                    startsAt: shiftUnavailableRanges.startsAt,
+                    endsAt: shiftUnavailableRanges.endsAt,
+                })
+                .from(shiftUnavailableRanges)
+                .where(eq(shiftUnavailableRanges.memberId, memberId)),
             this.db
                 .select({ slotId: shiftAssignments.slotId })
                 .from(shiftAssignments)
@@ -271,7 +305,9 @@ export class ShiftService {
             id: member.id,
             name: (await decryptPii(member.name)) ?? "",
             comment: await decryptPii(member.comment),
-            unavailableSlotIds: ng.map((r) => r.slotId),
+            unavailableRanges: ranges
+                .slice()
+                .sort((a, b) => a.startsAt - b.startsAt),
             assignedSlotIds: assigned.map((r) => r.slotId),
         };
     }
@@ -280,7 +316,7 @@ export class ShiftService {
      * 管理者ビュー: メンバー一覧（復号済み氏名 + NG）と確定割当をまとめて返す。
      */
     async getAdminView(boardId: string) {
-        const [memberRows, ngRows, assignments] = await Promise.all([
+        const [memberRows, rangeRows, assignments] = await Promise.all([
             this.db
                 .select({
                     id: shiftMembers.id,
@@ -292,20 +328,21 @@ export class ShiftService {
                 .where(eq(shiftMembers.boardId, boardId)),
             this.db
                 .select({
-                    memberId: shiftUnavailabilities.memberId,
-                    slotId: shiftUnavailabilities.slotId,
+                    memberId: shiftUnavailableRanges.memberId,
+                    startsAt: shiftUnavailableRanges.startsAt,
+                    endsAt: shiftUnavailableRanges.endsAt,
                 })
-                .from(shiftUnavailabilities)
-                .innerJoin(shiftMembers, eq(shiftUnavailabilities.memberId, shiftMembers.id))
+                .from(shiftUnavailableRanges)
+                .innerJoin(shiftMembers, eq(shiftUnavailableRanges.memberId, shiftMembers.id))
                 .where(eq(shiftMembers.boardId, boardId)),
             this.listAssignments(boardId),
         ]);
 
-        const ngByMember = new Map<string, string[]>();
-        for (const r of ngRows) {
-            const arr = ngByMember.get(r.memberId) ?? [];
-            arr.push(r.slotId);
-            ngByMember.set(r.memberId, arr);
+        const rangesByMember = new Map<string, TimeRange[]>();
+        for (const r of rangeRows) {
+            const arr = rangesByMember.get(r.memberId) ?? [];
+            arr.push({ startsAt: r.startsAt, endsAt: r.endsAt });
+            rangesByMember.set(r.memberId, arr);
         }
 
         const members = await Promise.all(
@@ -313,7 +350,9 @@ export class ShiftService {
                 id: m.id,
                 name: (await decryptPii(m.name)) ?? "",
                 comment: await decryptPii(m.comment),
-                unavailableSlotIds: ngByMember.get(m.id) ?? [],
+                unavailableRanges: (rangesByMember.get(m.id) ?? []).sort(
+                    (a, b) => a.startsAt - b.startsAt
+                ),
             }))
         );
         members.sort((a, b) => a.name.localeCompare(b.name, "ja"));
@@ -378,19 +417,20 @@ export class ShiftService {
         const { members } = await this.getAdminView(boardId);
         const slots = await this.getSlots(boardId);
 
-        const ngByMember = new Map<string, Set<string>>(
-            members.map((m) => [m.id, new Set(m.unavailableSlotIds)])
+        const rangesByMember = new Map<string, TimeRange[]>(
+            members.map((m) => [m.id, m.unavailableRanges])
         );
         const load = new Map<string, number>(members.map((m) => [m.id, 0]));
 
-        // 時間順に枠を処理。各枠で NG でない・時間が重複しないメンバーを負荷の低い順に詰める。
+        // 時間順に枠を処理。各枠で NG レンジに重ならない・既存割当と時間が重複しない
+        // メンバーを負荷の低い順に詰める。
         const ordered = [...slots].sort((a, b) => a.startsAt - b.startsAt);
         const assignedSpans = new Map<string, { startsAt: number; endsAt: number }[]>();
         const result: { slotId: string; memberId: string }[] = [];
 
         for (const slot of ordered) {
             const candidates = members
-                .filter((m) => !ngByMember.get(m.id)!.has(slot.id))
+                .filter((m) => !slotIsNg(slot, rangesByMember.get(m.id) ?? []))
                 .filter((m) => {
                     const spans = assignedSpans.get(m.id) ?? [];
                     return !spans.some((s) => slot.startsAt < s.endsAt && s.startsAt < slot.endsAt);
@@ -414,7 +454,10 @@ export class ShiftService {
         patch: {
             title?: string;
             description?: string;
-            date?: number;
+            startDate?: number;
+            endDate?: number;
+            dayStartMin?: number;
+            dayEndMin?: number;
             submissionDeadline?: number | null;
             slots?: ShiftSlotInput[];
         }
@@ -422,7 +465,10 @@ export class ShiftService {
         const set: Record<string, unknown> = {};
         if (patch.title !== undefined) set.title = patch.title;
         if (patch.description !== undefined) set.description = patch.description;
-        if (patch.date !== undefined) set.date = patch.date;
+        if (patch.startDate !== undefined) set.startDate = patch.startDate;
+        if (patch.endDate !== undefined) set.endDate = patch.endDate;
+        if (patch.dayStartMin !== undefined) set.dayStartMin = patch.dayStartMin;
+        if (patch.dayEndMin !== undefined) set.dayEndMin = patch.dayEndMin;
         if (patch.submissionDeadline !== undefined) set.submissionDeadline = patch.submissionDeadline;
         if (Object.keys(set).length > 0) {
             await this.db
@@ -503,7 +549,8 @@ export class ShiftService {
             .select({
                 id: shiftBoards.id,
                 title: shiftBoards.title,
-                date: shiftBoards.date,
+                startDate: shiftBoards.startDate,
+                endDate: shiftBoards.endDate,
                 status: shiftBoards.status,
                 createdAt: shiftBoards.createdAt,
             })

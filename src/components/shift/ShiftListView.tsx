@@ -5,12 +5,13 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus, CalendarClock } from "lucide-react";
 import { useUser } from "@/hooks/useUser";
-import { formatDateLabel } from "@/lib/officeHour";
+import { formatDay } from "@/lib/shift";
 
 type Item = {
     id: string;
     title: string;
-    date: number;
+    startDate: number;
+    endDate: number;
     status: "collecting" | "published";
     createdAt: number;
 };
@@ -67,7 +68,9 @@ export function ShiftListView() {
                                     <div className="truncate font-medium">{it.title}</div>
                                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                         <CalendarClock className="size-3" />
-                                        {formatDateLabel(it.date)}
+                                        {it.startDate === it.endDate
+                                            ? formatDay(it.startDate)
+                                            : `${formatDay(it.startDate)} 〜 ${formatDay(it.endDate)}`}
                                     </div>
                                 </div>
                                 <span

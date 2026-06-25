@@ -166,8 +166,12 @@ export const shiftBoards = sqliteTable(
         id: text("id").primaryKey(),
         title: text("title").notNull(),
         description: text("description"),
-        /** 対象日（JST 0:00 の ms epoch）。前日準備は前日の日付の表を作るだけ。 */
-        date: integer("date").notNull(),
+        /** 収集対象の開始日・終了日（JST 0:00 の ms epoch、両端含む）。前日準備〜当日を1表で扱う。 */
+        startDate: integer("start_date").notNull(),
+        endDate: integer("end_date").notNull(),
+        /** 各日の収集時間帯（0:00 からの分）。メンバーはこの帯の中で NG をマークする。 */
+        dayStartMin: integer("day_start_min").notNull().default(540),
+        dayEndMin: integer("day_end_min").notNull().default(1080),
         /** 'collecting'（NG募集中） | 'published'（割当公開済み） */
         status: text("status").notNull().default("collecting"),
         /** NG 提出締切（ms epoch）。任意。 */
@@ -226,20 +230,20 @@ export const shiftMembers = sqliteTable(
 );
 
 /**
- * NG 申告。行が存在する = そのメンバーはその枠に出られない。
- * 自然キー (member_id, slot_id) を複合主キーとする（availabilities と同方針）。
+ * NG 申告（時間レンジ）。シフト枠とは独立に「出られない時間帯」を保持する。
+ * 枠は集計段階で作成され、枠の時間と本人 NG レンジの重なりで枠ごとの NG を導出する。
  */
-export const shiftUnavailabilities = sqliteTable(
-    "shift_unavailabilities",
+export const shiftUnavailableRanges = sqliteTable(
+    "shift_unavailable_ranges",
     {
+        id: text("id").primaryKey(),
         memberId: text("member_id")
             .notNull()
             .references(() => shiftMembers.id, { onDelete: "cascade" }),
-        slotId: text("slot_id")
-            .notNull()
-            .references(() => shiftSlots.id, { onDelete: "cascade" }),
+        startsAt: integer("starts_at").notNull(), // ms epoch
+        endsAt: integer("ends_at").notNull(), // ms epoch
     },
-    (t) => [primaryKey({ columns: [t.memberId, t.slotId] })]
+    (t) => [index("idx_shift_unavail_ranges_member").on(t.memberId)]
 );
 
 /**

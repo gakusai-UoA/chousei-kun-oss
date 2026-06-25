@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
     Loader2,
     AlertCircle,
+    AlertTriangle,
     Users,
     MapPin,
     Wand2,
@@ -20,8 +21,18 @@ import {
     Ban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDateLabel } from "@/lib/officeHour";
-import { formatMinutes, msToMinutes, rangesOverlap, type ShiftAdminView as AdminView } from "@/lib/shift";
+import {
+    DAY_MS,
+    boardDays,
+    dayIndexOf,
+    msToDayMin,
+    formatMinutes,
+    formatDay,
+    rangesOverlap,
+    slotIsNg,
+    type ShiftAdminView as AdminView,
+    type ShiftSlot,
+} from "@/lib/shift";
 
 type Phase = "loading" | "auth" | "ready" | "error";
 
@@ -30,7 +41,6 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
     const [data, setData] = React.useState<AdminView | null>(null);
     const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
-    // 割当: slotId -> Set<memberId>
     const [assign, setAssign] = React.useState<Map<string, Set<string>>>(new Map());
     const [dirty, setDirty] = React.useState(false);
 
@@ -162,10 +172,7 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
     const togglePublish = async () => {
         if (!data) return;
         const next = data.board.status !== "published";
-        if (next && dirty) {
-            // 公開前に未保存の割当があれば先に保存する。
-            await save();
-        }
+        if (next && dirty) await save();
         setPublishing(true);
         try {
             const res = await fetch(`/api/shifts/${boardId}/publish`, {
@@ -185,11 +192,8 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
     const handleDelete = async () => {
         if (!confirm("このシフト表を削除しますか？この操作は元に戻せません。")) return;
         const res = await fetch(`/api/shifts/${boardId}`, { method: "DELETE" });
-        if (res.ok) {
-            window.location.href = "/shifts";
-        } else {
-            setErrorMsg("削除に失敗しました。");
-        }
+        if (res.ok) window.location.href = "/shifts";
+        else setErrorMsg("削除に失敗しました。");
     };
 
     const copyShareLink = async () => {
@@ -245,27 +249,28 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
     }
 
     const { board, slots, members } = data;
-    const orderedSlots = [...slots].sort(
-        (a, b) => a.sortOrder - b.sortOrder || a.startsAt - b.startsAt
-    );
+    const days = boardDays(board);
     const isPublished = board.status === "published";
+    const slotById = new Map(slots.map((s) => [s.id, s]));
 
-    // 各メンバーの現在割当数（負荷バランスの目安）。
+    const slotTime = (s: ShiftSlot) => {
+        const di = dayIndexOf(s.startsAt, board.startDate);
+        const mid = board.startDate + di * DAY_MS;
+        return `${formatMinutes(msToDayMin(s.startsAt, mid))}–${formatMinutes(msToDayMin(s.endsAt, mid))}`;
+    };
+
+    // メンバーごとの割当数（負荷バランスの目安）と割当枠。
     const load_ = new Map<string, number>();
-    for (const set of assign.values()) {
-        for (const mid of set) load_.set(mid, (load_.get(mid) ?? 0) + 1);
-    }
-
-    // メンバーの時間重複検出（同一メンバーが重なる枠に割り当てられていないか）。
     const memberSlots = new Map<string, string[]>();
     for (const [slotId, set] of assign) {
         for (const mid of set) {
+            load_.set(mid, (load_.get(mid) ?? 0) + 1);
             const arr = memberSlots.get(mid) ?? [];
             arr.push(slotId);
             memberSlots.set(mid, arr);
         }
     }
-    const slotById = new Map(orderedSlots.map((s) => [s.id, s]));
+
     const hasTimeConflict = (slotId: string, memberId: string): boolean => {
         const s = slotById.get(slotId);
         if (!s) return false;
@@ -275,6 +280,23 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
             return o ? rangesOverlap(s.startsAt, s.endsAt, o.startsAt, o.endsAt) : false;
         });
     };
+
+    // 警告サマリ: ①時間重複の二重割当 ②本人 NG 時間帯への割当。
+    const overlapWarnings: { member: string; a: ShiftSlot; b: ShiftSlot }[] = [];
+    const ngWarnings: { member: string; slot: ShiftSlot }[] = [];
+    for (const m of members) {
+        const sids = (memberSlots.get(m.id) ?? [])
+            .map((id) => slotById.get(id))
+            .filter((s): s is ShiftSlot => !!s)
+            .sort((a, b) => a.startsAt - b.startsAt);
+        for (let i = 0; i < sids.length; i++) {
+            if (slotIsNg(sids[i], m.unavailableRanges)) ngWarnings.push({ member: m.name, slot: sids[i] });
+            for (let j = i + 1; j < sids.length; j++) {
+                if (rangesOverlap(sids[i].startsAt, sids[i].endsAt, sids[j].startsAt, sids[j].endsAt))
+                    overlapWarnings.push({ member: m.name, a: sids[i], b: sids[j] });
+            }
+        }
+    }
 
     return (
         <div className="w-full space-y-6 px-6 py-10 lg:px-12">
@@ -293,7 +315,10 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
                     </span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                    {formatDateLabel(board.date)} ・ 回答 {members.length} 名
+                    {board.startDate === board.endDate
+                        ? formatDay(board.startDate)
+                        : `${formatDay(board.startDate)} 〜 ${formatDay(board.endDate)}`}{" "}
+                    ・ 回答 {members.length} 名
                 </p>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" onClick={copyShareLink} className="gap-1">
@@ -302,7 +327,7 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
                     </Button>
                     <Button variant="outline" size="sm" asChild className="gap-1">
                         <Link href={`/shifts/${boardId}/edit`}>
-                            <Pencil className="size-4" /> 枠を編集
+                            <Pencil className="size-4" /> 枠を作成・編集
                         </Link>
                     </Button>
                     <Button variant="outline" size="sm" onClick={handleDelete} className="gap-1 text-destructive">
@@ -321,6 +346,14 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
             {members.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
                     まだ回答がありません。共有リンクをメンバーに配布してください。
+                </div>
+            ) : slots.length === 0 ? (
+                <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                    回答が {members.length} 名分集まっています。
+                    <Link href={`/shifts/${boardId}/edit`} className="mx-1 text-primary underline">
+                        枠を作成
+                    </Link>
+                    すると、ここで NG・定員を見ながら割り当てられます。
                 </div>
             ) : (
                 <>
@@ -357,75 +390,114 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
                         </Button>
                     </div>
 
+                    {(overlapWarnings.length > 0 || ngWarnings.length > 0) && (
+                        <div className="space-y-1 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800">
+                            <div className="flex items-center gap-1.5 font-medium">
+                                <AlertTriangle className="size-4" /> 割当の警告
+                            </div>
+                            {overlapWarnings.map((w, i) => (
+                                <div key={`o${i}`}>
+                                    <b>{w.member}</b> が時間の重なる枠に二重割当: 「{w.a.role}」{slotTime(w.a)} と 「
+                                    {w.b.role}」{slotTime(w.b)}
+                                </div>
+                            ))}
+                            {ngWarnings.map((w, i) => (
+                                <div key={`n${i}`}>
+                                    <b>{w.member}</b> は NG 時間帯に割当: 「{w.slot.role}」{slotTime(w.slot)}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
                     <p className="text-xs text-muted-foreground">
                         各枠でメンバーをタップして割当します。
                         <Ban className="mx-1 inline size-3 text-destructive" />
-                        は本人が「出られない」とした枠で、割当できません。背景が黄色は時間が重複している警告です。
+                        は本人の NG 時間帯と重なる枠で、割当できません。背景が黄色は時間が重複している警告です。
                     </p>
 
-                    <div className="grid gap-3 xl:grid-cols-2">
-                        {orderedSlots.map((s) => {
-                            const assigned = assign.get(s.id) ?? new Set<string>();
-                            const over = assigned.size > s.capacity;
-                            return (
-                                <div key={s.id} className="rounded-lg border p-3">
-                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                        <div className="font-medium">
-                                            {s.role}
-                                            <span className="ml-2 text-xs font-normal text-muted-foreground">
-                                                {formatMinutes(msToMinutes(s.startsAt, board.date))}–
-                                                {formatMinutes(msToMinutes(s.endsAt, board.date))}
-                                                {s.place && (
-                                                    <>
-                                                        {" ・ "}
-                                                        <MapPin className="inline size-3" /> {s.place}
-                                                    </>
-                                                )}
-                                            </span>
-                                        </div>
-                                        <span
-                                            className={cn(
-                                                "flex items-center gap-1 rounded px-1.5 py-0.5 text-xs",
-                                                over
-                                                    ? "bg-amber-500/15 text-amber-700"
-                                                    : "bg-muted text-muted-foreground"
-                                            )}
-                                        >
-                                            <Users className="size-3" />
-                                            {assigned.size}/{s.capacity}
-                                        </span>
-                                    </div>
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {members.map((m) => {
-                                            const ng = m.unavailableSlotIds.includes(s.id);
-                                            const on = assigned.has(m.id);
-                                            const conflict = on && hasTimeConflict(s.id, m.id);
-                                            return (
-                                                <button
-                                                    type="button"
-                                                    key={m.id}
-                                                    disabled={ng && !on}
-                                                    onClick={() => toggleAssign(s.id, m.id)}
-                                                    title={ng ? "本人が出られないと回答" : undefined}
-                                                    className={cn(
-                                                        "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
-                                                        ng && !on && "cursor-not-allowed border-destructive/30 bg-destructive/5 text-destructive/60 line-through",
-                                                        on && !conflict && "border-primary bg-primary text-primary-foreground",
-                                                        on && conflict && "border-amber-500 bg-amber-400/80 text-amber-950",
-                                                        !on && !ng && "border-border bg-background hover:border-primary/50 hover:bg-accent"
-                                                    )}
-                                                >
-                                                    {ng && <Ban className="size-3" />}
-                                                    {m.name}
-                                                    <span className="opacity-60">({load_.get(m.id) ?? 0})</span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
+                    {days.map((d, di) => {
+                        const daySlots = slots
+                            .filter((s) => dayIndexOf(s.startsAt, board.startDate) === di)
+                            .sort((a, b) => a.startsAt - b.startsAt);
+                        if (daySlots.length === 0) return null;
+                        return (
+                            <div key={d} className="space-y-2">
+                                <h3 className="text-sm font-semibold text-muted-foreground">{formatDay(d)}</h3>
+                                <div className="grid gap-3 xl:grid-cols-2">
+                                    {daySlots.map((s) => {
+                                        const assigned = assign.get(s.id) ?? new Set<string>();
+                                        const over = assigned.size > s.capacity;
+                                        return (
+                                            <div key={s.id} className="rounded-lg border p-3">
+                                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                                    <div className="font-medium">
+                                                        {s.role}
+                                                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                                                            {slotTime(s)}
+                                                            {s.place && (
+                                                                <>
+                                                                    {" ・ "}
+                                                                    <MapPin className="inline size-3" /> {s.place}
+                                                                </>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                    <span
+                                                        className={cn(
+                                                            "flex items-center gap-1 rounded px-1.5 py-0.5 text-xs",
+                                                            over
+                                                                ? "bg-amber-500/15 text-amber-700"
+                                                                : "bg-muted text-muted-foreground"
+                                                        )}
+                                                    >
+                                                        <Users className="size-3" />
+                                                        {assigned.size}/{s.capacity}
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {members.map((m) => {
+                                                        const ng = slotIsNg(s, m.unavailableRanges);
+                                                        const on = assigned.has(m.id);
+                                                        const conflict = on && hasTimeConflict(s.id, m.id);
+                                                        return (
+                                                            <button
+                                                                type="button"
+                                                                key={m.id}
+                                                                disabled={ng && !on}
+                                                                onClick={() => toggleAssign(s.id, m.id)}
+                                                                title={ng ? "本人の NG 時間帯と重なる" : undefined}
+                                                                className={cn(
+                                                                    "flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
+                                                                    ng &&
+                                                                        !on &&
+                                                                        "cursor-not-allowed border-destructive/30 bg-destructive/5 text-destructive/60 line-through",
+                                                                    on &&
+                                                                        !conflict &&
+                                                                        "border-primary bg-primary text-primary-foreground",
+                                                                    on &&
+                                                                        conflict &&
+                                                                        "border-amber-500 bg-amber-400/80 text-amber-950",
+                                                                    !on &&
+                                                                        !ng &&
+                                                                        "border-border bg-background hover:border-primary/50 hover:bg-accent"
+                                                                )}
+                                                            >
+                                                                {ng && <Ban className="size-3" />}
+                                                                {m.name}
+                                                                <span className="opacity-60">
+                                                                    ({load_.get(m.id) ?? 0})
+                                                                </span>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
                                 </div>
-                            );
-                        })}
-                    </div>
+                            </div>
+                        );
+                    })}
                 </>
             )}
         </div>

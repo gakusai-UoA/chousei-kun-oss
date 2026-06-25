@@ -8,14 +8,25 @@ import { Button } from "@/components/ui/button";
 import { Loader2, AlertCircle, CalendarClock } from "lucide-react";
 import { useUser } from "@/hooks/useUser";
 import { parseDateInput, formatIsoDate } from "@/lib/officeHour";
-import { minutesToMs, msToMinutes } from "@/lib/shift";
-import { ShiftTimelineEditor, newDraftSlot, type DraftSlot } from "./ShiftTimelineEditor";
+import {
+    DAY_MS,
+    boardDays,
+    dayIndexOf,
+    dayMinToMs,
+    msToDayMin,
+    formatMinutes,
+    parseHm,
+} from "@/lib/shift";
+import { ShiftSlotEditor, type DraftSlot } from "./ShiftSlotEditor";
 
 export type ShiftEditData = {
     id: string;
     title: string;
     description: string | null;
-    date: number;
+    startDate: number;
+    endDate: number;
+    dayStartMin: number;
+    dayEndMin: number;
     submissionDeadline: number | null;
     slots: {
         id: string;
@@ -37,10 +48,19 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
 
     const [title, setTitle] = React.useState(editData?.title ?? "");
     const [description, setDescription] = React.useState(editData?.description ?? "");
-    const [dateStr, setDateStr] = React.useState(
-        editData ? formatIsoDate(editData.date) : ""
-    );
+    const [startStr, setStartStr] = React.useState(editData ? formatIsoDate(editData.startDate) : "");
+    const [endStr, setEndStr] = React.useState(editData ? formatIsoDate(editData.endDate) : "");
+    const [dayStartMin, setDayStartMin] = React.useState(editData?.dayStartMin ?? 9 * 60);
+    const [dayEndMin, setDayEndMin] = React.useState(editData?.dayEndMin ?? 18 * 60);
     const [adminPassword, setAdminPassword] = React.useState("");
+
+    const startDate = parseDateInput(startStr);
+    const endDate = parseDateInput(endStr);
+    const days =
+        startDate !== null && endDate !== null && endDate >= startDate
+            ? boardDays({ startDate, endDate })
+            : [];
+
     const [slots, setSlots] = React.useState<DraftSlot[]>(() => {
         if (editData) {
             return editData.slots
@@ -48,48 +68,68 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                 .sort((a, b) => a.sortOrder - b.sortOrder || a.startsAt - b.startsAt)
                 .map((s) => {
                     editKeyCounter += 1;
+                    const di = dayIndexOf(s.startsAt, editData.startDate);
+                    const mid = editData.startDate + di * DAY_MS;
                     return {
                         key: `edit-${editKeyCounter}`,
                         id: s.id,
-                        startMin: msToMinutes(s.startsAt, editData.date),
-                        endMin: msToMinutes(s.endsAt, editData.date),
+                        dayIndex: di,
+                        startMin: msToDayMin(s.startsAt, mid),
+                        endMin: msToDayMin(s.endsAt, mid),
                         role: s.role,
                         place: s.place ?? "",
                         capacity: s.capacity,
-                    };
+                    } as DraftSlot;
                 });
         }
-        return [newDraftSlot(9 * 60, 120)];
+        return [];
     });
 
     const [submitting, setSubmitting] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
 
+    const setDayStart = (v: string) => {
+        const m = parseHm(v);
+        if (m !== null) setDayStartMin(m);
+    };
+    const setDayEnd = (v: string) => {
+        const m = parseHm(v);
+        if (m !== null) setDayEndMin(m);
+    };
+
     const handleSubmit = async () => {
         setError(null);
         const trimmedTitle = title.trim();
         if (!trimmedTitle) return setError("タイトルを入力してください。");
-        const date = parseDateInput(dateStr);
-        if (date === null) return setError("対象日を選択してください。");
+        if (startDate === null || endDate === null) return setError("対象期間（開始日・終了日）を設定してください。");
+        if (endDate < startDate) return setError("終了日は開始日以降にしてください。");
+        if (dayEndMin <= dayStartMin) return setError("収集時間帯の終了は開始より後にしてください。");
         if (!isEdit && adminPassword.length < 8)
             return setError("管理パスワードは 8 文字以上で設定してください。");
-        const cleanSlots = slots.filter((s) => s.role.trim() !== "");
-        if (cleanSlots.length === 0)
-            return setError("役割を入力したシフト枠を 1 つ以上作成してください。");
-        for (const s of cleanSlots) {
-            if (s.endMin <= s.startMin)
-                return setError(`「${s.role}」の終了時刻は開始時刻より後にしてください。`);
-        }
 
-        const payloadSlots = cleanSlots.map((s, i) => ({
-            ...(s.id ? { id: s.id } : {}),
-            startsAt: minutesToMs(s.startMin, date),
-            endsAt: minutesToMs(s.endMin, date),
-            role: s.role.trim(),
-            place: s.place.trim(),
-            capacity: s.capacity,
-            sortOrder: i,
-        }));
+        const validSlots = slots.filter((s) => s.dayIndex < days.length && s.role.trim() !== "");
+        const payloadSlots = validSlots.map((s, i) => {
+            const mid = days[s.dayIndex];
+            return {
+                ...(s.id ? { id: s.id } : {}),
+                startsAt: dayMinToMs(mid, s.startMin),
+                endsAt: dayMinToMs(mid, s.endMin),
+                role: s.role.trim(),
+                place: s.place.trim(),
+                capacity: s.capacity,
+                sortOrder: i,
+            };
+        });
+
+        const common = {
+            title: trimmedTitle,
+            description,
+            startDate,
+            endDate,
+            dayStartMin,
+            dayEndMin,
+            slots: payloadSlots,
+        };
 
         setSubmitting(true);
         try {
@@ -97,12 +137,7 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                 const res = await fetch(`/api/shifts/${editData!.id}`, {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        title: trimmedTitle,
-                        description,
-                        date,
-                        slots: payloadSlots,
-                    }),
+                    body: JSON.stringify(common),
                 });
                 if (!res.ok) {
                     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -113,14 +148,7 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                 const res = await fetch("/api/shifts", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        title: trimmedTitle,
-                        description,
-                        date,
-                        slots: payloadSlots,
-                        adminPassword,
-                        creatorUserId: userId ?? undefined,
-                    }),
+                    body: JSON.stringify({ ...common, adminPassword, creatorUserId: userId ?? undefined }),
                 });
                 if (!res.ok) {
                     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -143,7 +171,8 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                     {isEdit ? "シフト表を編集" : "シフト表を作成"}
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                    1 日分のシフト枠を作成します。前日準備の日も、その日付で別の表を作るだけです。
+                    対象期間と「各日の収集時間帯」を決めると、メンバーはその範囲で「出られない時間帯」を申告します。
+                    シフト枠は今作っても、集計時に追加してもかまいません。
                 </p>
             </div>
 
@@ -161,16 +190,12 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                         <Input
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
-                            placeholder="例: 前日準備シフト"
+                            placeholder="例: 前日準備〜当日シフト"
                             maxLength={200}
                         />
                     </div>
-                    <div className="space-y-1.5">
-                        <label className="text-sm font-medium">対象日</label>
-                        <Input type="date" value={dateStr} onChange={(e) => setDateStr(e.target.value)} />
-                    </div>
                     {!isEdit && (
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 lg:col-span-2">
                             <label className="text-sm font-medium">管理パスワード（8文字以上）</label>
                             <Input
                                 type="password"
@@ -181,6 +206,35 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                             />
                         </div>
                     )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                    <div className="space-y-1.5">
+                        <label className="text-sm font-medium">開始日</label>
+                        <Input type="date" value={startStr} onChange={(e) => setStartStr(e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                        <label className="text-sm font-medium">終了日</label>
+                        <Input type="date" value={endStr} onChange={(e) => setEndStr(e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                        <label className="text-sm font-medium">収集時間帯（開始）</label>
+                        <Input
+                            type="time"
+                            step={300}
+                            value={formatMinutes(Math.min(dayStartMin, 1439))}
+                            onChange={(e) => setDayStart(e.target.value)}
+                        />
+                    </div>
+                    <div className="space-y-1.5">
+                        <label className="text-sm font-medium">収集時間帯（終了）</label>
+                        <Input
+                            type="time"
+                            step={300}
+                            value={formatMinutes(Math.min(dayEndMin, 1439))}
+                            onChange={(e) => setDayEnd(e.target.value)}
+                        />
+                    </div>
                 </div>
 
                 <div className="space-y-1.5">
@@ -195,11 +249,17 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
                 </div>
 
                 <div className="space-y-2">
-                    <label className="text-sm font-medium">シフト枠</label>
+                    <label className="text-sm font-medium">シフト枠（任意・集計時に追加も可）</label>
                     <p className="text-xs text-muted-foreground">
-                        バーの中央をドラッグで移動、左右の端をドラッグで開始・終了を調整できます。
+                        バー中央のドラッグで移動、左右端のドラッグで開始・終了を調整できます。
                     </p>
-                    <ShiftTimelineEditor slots={slots} onChange={setSlots} />
+                    <ShiftSlotEditor
+                        days={days}
+                        dayStartMin={dayStartMin}
+                        dayEndMin={dayEndMin}
+                        slots={slots}
+                        onChange={setSlots}
+                    />
                 </div>
             </div>
 

@@ -58,7 +58,10 @@ shiftsRoutes.post("/", sValidator("json", createShiftBoardSchema), async (c) => 
     const { id, adminAccessToken } = await svc.create({
         title: body.title,
         description: body.description || undefined,
-        date: body.date,
+        startDate: body.startDate,
+        endDate: body.endDate,
+        dayStartMin: body.dayStartMin,
+        dayEndMin: body.dayEndMin,
         submissionDeadline: body.submissionDeadline ?? null,
         slots: body.slots,
         adminPassword: body.adminPassword,
@@ -132,7 +135,7 @@ shiftsRoutes.post(
             userId: body.userId,
             name: body.name,
             comment: body.comment || undefined,
-            unavailableSlotIds: body.unavailableSlotIds,
+            unavailableRanges: body.unavailableRanges,
         });
         return c.json({ ok: true, memberId });
     }
@@ -192,14 +195,7 @@ shiftsRoutes.get(
         if (!board) return c.json({ error: "Shift board not found" }, 404);
         const [slots, adminView] = await Promise.all([svc.getSlots(id), svc.getAdminView(id)]);
         return c.json({
-            board: {
-                id: board.id,
-                title: board.title,
-                description: board.description,
-                date: board.date,
-                status: board.status,
-                submissionDeadline: board.submissionDeadline,
-            },
+            board: svc.toBoardMeta(board),
             slots,
             members: adminView.members,
             assignments: adminView.assignments,

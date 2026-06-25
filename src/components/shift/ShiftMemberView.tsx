@@ -17,17 +17,24 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUser } from "@/hooks/useUser";
-import { formatDateLabel } from "@/lib/officeHour";
 import {
+    DAY_MS,
+    boardDays,
+    dayIndexOf,
+    dayMinToMs,
+    msToDayMin,
     formatMinutes,
-    msToMinutes,
+    formatDay,
     type ShiftPublicView,
     type ShiftMemberDetail,
 } from "@/lib/shift";
+import { ShiftNgEditor, type DraftRange } from "./ShiftNgEditor";
 
 function memberStorageKey(boardId: string) {
     return `chosei_shift_member_${boardId}`;
 }
+
+let loadKeyCounter = 0;
 
 export function ShiftMemberView({ boardId }: { boardId: string }) {
     const { userId } = useUser();
@@ -38,15 +45,13 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
     const [memberId, setMemberId] = React.useState<string | null>(null);
     const [name, setName] = React.useState("");
     const [comment, setComment] = React.useState("");
-    // NG（出られない）枠の id 集合。
-    const [ngSet, setNgSet] = React.useState<Set<string>>(new Set());
+    const [ranges, setRanges] = React.useState<DraftRange[]>([]);
     const [assignedSlotIds, setAssignedSlotIds] = React.useState<Set<string>>(new Set());
 
     const [submitting, setSubmitting] = React.useState(false);
     const [submitError, setSubmitError] = React.useState<string | null>(null);
     const [saved, setSaved] = React.useState(false);
 
-    // 公開ビューの取得。
     React.useEffect(() => {
         (async () => {
             try {
@@ -68,8 +73,9 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
         })();
     }, [boardId]);
 
-    // 既存メンバーの復元。
+    // 既存メンバーの復元（公開ビュー取得後に board.startDate で変換する）。
     React.useEffect(() => {
+        if (!view) return;
         const stored = localStorage.getItem(memberStorageKey(boardId));
         if (!stored) return;
         setMemberId(stored);
@@ -84,28 +90,39 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                 const m = (await res.json()) as ShiftMemberDetail;
                 setName(m.name);
                 setComment(m.comment ?? "");
-                setNgSet(new Set(m.unavailableSlotIds));
                 setAssignedSlotIds(new Set(m.assignedSlotIds));
+                const sd = view.board.startDate;
+                setRanges(
+                    m.unavailableRanges.map((r) => {
+                        loadKeyCounter += 1;
+                        const di = dayIndexOf(r.startsAt, sd);
+                        const mid = sd + di * DAY_MS;
+                        return {
+                            key: `load-${loadKeyCounter}`,
+                            dayIndex: di,
+                            startMin: msToDayMin(r.startsAt, mid),
+                            endMin: msToDayMin(r.endsAt, mid),
+                        } as DraftRange;
+                    })
+                );
             } catch {
                 /* ignore */
             }
         })();
-    }, [boardId]);
-
-    const toggleNg = (slotId: string) => {
-        setSaved(false);
-        setNgSet((prev) => {
-            const next = new Set(prev);
-            // eslint-disable-next-line drizzle/enforce-delete-with-where -- JS Set, not a Drizzle query
-            if (next.has(slotId)) next.delete(slotId);
-            else next.add(slotId);
-            return next;
-        });
-    };
+    }, [boardId, view]);
 
     const handleSubmit = async () => {
         setSubmitError(null);
         if (!name.trim()) return setSubmitError("名前を入力してください。");
+        if (!view) return;
+        const days = boardDays(view.board);
+        const payloadRanges = ranges
+            .filter((r) => r.dayIndex < days.length && r.endMin > r.startMin)
+            .map((r) => {
+                const mid = days[r.dayIndex];
+                return { startsAt: dayMinToMs(mid, r.startMin), endsAt: dayMinToMs(mid, r.endMin) };
+            });
+
         setSubmitting(true);
         try {
             const res = await fetch(`/api/shifts/${boardId}/members`, {
@@ -116,7 +133,7 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                     comment,
                     memberId: memberId ?? undefined,
                     userId: userId ?? undefined,
-                    unavailableSlotIds: [...ngSet],
+                    unavailableRanges: payloadRanges,
                 }),
             });
             if (!res.ok) {
@@ -152,10 +169,25 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
     }
 
     const { board, slots, assignments } = view;
-    const orderedSlots = [...slots].sort(
-        (a, b) => a.sortOrder - b.sortOrder || a.startsAt - b.startsAt
-    );
+    const days = boardDays(board);
     const isPublished = board.status === "published";
+
+    // 参照用: 日ごとのシフト枠（背景表示）。
+    const slotsByDay: Record<number, { startMin: number; endMin: number; label?: string }[]> = {};
+    for (const s of slots) {
+        const di = dayIndexOf(s.startsAt, board.startDate);
+        const mid = board.startDate + di * DAY_MS;
+        (slotsByDay[di] ??= []).push({
+            startMin: msToDayMin(s.startsAt, mid),
+            endMin: msToDayMin(s.endsAt, mid),
+            label: s.role,
+        });
+    }
+
+    const dateRangeLabel =
+        board.startDate === board.endDate
+            ? formatDay(board.startDate)
+            : `${formatDay(board.startDate)} 〜 ${formatDay(board.endDate)}`;
 
     return (
         <div className="w-full space-y-6 px-6 py-10 lg:px-12">
@@ -163,7 +195,7 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                 <h1 className="text-2xl font-bold">{board.title}</h1>
                 <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
                     <CalendarClock className="size-4" />
-                    {formatDateLabel(board.date)}
+                    {dateRangeLabel} ・ {formatMinutes(board.dayStartMin)}–{formatMinutes(board.dayEndMin)}
                 </p>
                 {board.description && (
                     <p className="whitespace-pre-wrap pt-1 text-sm text-muted-foreground">
@@ -174,20 +206,23 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
 
             {isPublished ? (
                 <PublishedRoster
-                    boardDate={board.date}
-                    slots={orderedSlots}
+                    board={board}
+                    days={days}
+                    slots={slots}
                     assignments={assignments}
                     myAssigned={assignedSlotIds}
                 />
             ) : (
                 <>
-                    <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
-                        出られない枠だけを <Ban className="inline size-4 text-destructive" /> でマークして送信してください。
-                        マークしなかった枠は「出られる」として扱われます。
+                    <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+                        <Ban className="mr-1 inline size-4 text-destructive" />
+                        参加できない時間帯を日付ごとに指定して送信してください。
+                        指定しなかった時間は「参加できる」として扱われます。
                     </div>
 
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                         <Input
+                            className="max-w-md"
                             placeholder="あなたの名前"
                             value={name}
                             onChange={(e) => {
@@ -197,57 +232,20 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                             maxLength={100}
                         />
 
-                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                            {orderedSlots.map((s) => {
-                                const ng = ngSet.has(s.id);
-                                return (
-                                    <button
-                                        type="button"
-                                        key={s.id}
-                                        onClick={() => toggleNg(s.id)}
-                                        className={cn(
-                                            "flex w-full items-center justify-between gap-3 rounded-lg border p-3 text-left transition-colors",
-                                            ng
-                                                ? "border-destructive/50 bg-destructive/10"
-                                                : "border-border hover:border-primary/40 hover:bg-accent"
-                                        )}
-                                    >
-                                        <div className="min-w-0">
-                                            <div className="font-medium">{s.role}</div>
-                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                                                <span>
-                                                    {formatMinutes(msToMinutes(s.startsAt, board.date))}–
-                                                    {formatMinutes(msToMinutes(s.endsAt, board.date))}
-                                                </span>
-                                                {s.place && (
-                                                    <span className="flex items-center gap-0.5">
-                                                        <MapPin className="size-3" />
-                                                        {s.place}
-                                                    </span>
-                                                )}
-                                                <span className="flex items-center gap-0.5">
-                                                    <Users className="size-3" />
-                                                    定員 {s.capacity}
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <span
-                                            className={cn(
-                                                "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium",
-                                                ng
-                                                    ? "bg-destructive text-white"
-                                                    : "bg-muted text-muted-foreground"
-                                            )}
-                                        >
-                                            <Ban className="size-3.5" />
-                                            {ng ? "出られない" : "出られる"}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
+                        <ShiftNgEditor
+                            days={days}
+                            dayStartMin={board.dayStartMin}
+                            dayEndMin={board.dayEndMin}
+                            ranges={ranges}
+                            onChange={(r) => {
+                                setRanges(r);
+                                setSaved(false);
+                            }}
+                            slotsByDay={slotsByDay}
+                        />
 
                         <Textarea
+                            className="max-w-2xl"
                             placeholder="連絡事項・コメント（任意）"
                             value={comment}
                             onChange={(e) => {
@@ -271,7 +269,7 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                             </p>
                         )}
 
-                        <Button onClick={handleSubmit} disabled={submitting} className="w-full gap-2">
+                        <Button onClick={handleSubmit} disabled={submitting} className="gap-2">
                             {submitting && <Loader2 className="size-4 animate-spin" />}
                             {memberId ? "回答を更新" : "送信"}
                         </Button>
@@ -289,12 +287,14 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
 }
 
 function PublishedRoster({
-    boardDate,
+    board,
+    days,
     slots,
     assignments,
     myAssigned,
 }: {
-    boardDate: number;
+    board: ShiftPublicView["board"];
+    days: number[];
     slots: ShiftPublicView["slots"];
     assignments: ShiftPublicView["assignments"];
     myAssigned: Set<string>;
@@ -312,61 +312,74 @@ function PublishedRoster({
                 <CheckCircle2 className="mr-1 inline size-4 text-emerald-600" />
                 シフトが公開されました。あなたの担当枠は強調表示されています。
             </div>
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {slots.map((s) => {
-                    const names = bySlot.get(s.id) ?? [];
-                    const mine = myAssigned.has(s.id);
-                    return (
-                        <div
-                            key={s.id}
-                            className={cn(
-                                "rounded-lg border p-3",
-                                mine ? "border-primary bg-primary/5" : "border-border"
-                            )}
-                        >
-                            <div className="flex items-center justify-between gap-2">
-                                <div className="font-medium">
-                                    {s.role}
-                                    {mine && (
-                                        <span className="ml-2 rounded bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
-                                            担当
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                    {formatMinutes(msToMinutes(s.startsAt, boardDate))}–
-                                    {formatMinutes(msToMinutes(s.endsAt, boardDate))}
-                                </div>
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-                                {s.place && (
-                                    <span className="flex items-center gap-0.5">
-                                        <MapPin className="size-3" />
-                                        {s.place}
-                                    </span>
-                                )}
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                                {names.length > 0 ? (
-                                    names.map((n, i) => (
-                                        <span
-                                            key={i}
-                                            className="rounded-full bg-muted px-2 py-0.5 text-xs"
-                                        >
-                                            {n}
-                                        </span>
-                                    ))
-                                ) : (
-                                    <span className="flex items-center gap-1 text-xs text-amber-600">
-                                        <Lock className="size-3" />
-                                        未割当
-                                    </span>
-                                )}
-                            </div>
+            {days.map((d, di) => {
+                const daySlots = slots
+                    .filter((s) => dayIndexOf(s.startsAt, board.startDate) === di)
+                    .sort((a, b) => a.startsAt - b.startsAt);
+                if (daySlots.length === 0) return null;
+                return (
+                    <div key={d} className="space-y-2">
+                        <h3 className="text-sm font-semibold text-muted-foreground">{formatDay(d)}</h3>
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                            {daySlots.map((s) => {
+                                const names = bySlot.get(s.id) ?? [];
+                                const mine = myAssigned.has(s.id);
+                                const mid = board.startDate + di * DAY_MS;
+                                return (
+                                    <div
+                                        key={s.id}
+                                        className={cn(
+                                            "rounded-lg border p-3",
+                                            mine ? "border-primary bg-primary/5" : "border-border"
+                                        )}
+                                    >
+                                        <div className="flex items-center justify-between gap-2">
+                                            <div className="font-medium">
+                                                {s.role}
+                                                {mine && (
+                                                    <span className="ml-2 rounded bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
+                                                        担当
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground">
+                                                {formatMinutes(msToDayMin(s.startsAt, mid))}–
+                                                {formatMinutes(msToDayMin(s.endsAt, mid))}
+                                            </div>
+                                        </div>
+                                        {s.place && (
+                                            <div className="mt-1 flex items-center gap-0.5 text-xs text-muted-foreground">
+                                                <MapPin className="size-3" />
+                                                {s.place}
+                                            </div>
+                                        )}
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                            {names.length > 0 ? (
+                                                names.map((n, i) => (
+                                                    <span
+                                                        key={i}
+                                                        className="rounded-full bg-muted px-2 py-0.5 text-xs"
+                                                    >
+                                                        {n}
+                                                    </span>
+                                                ))
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-xs text-amber-600">
+                                                    <Lock className="size-3" /> 未割当
+                                                </span>
+                                            )}
+                                            <span className="ml-auto flex items-center gap-0.5 text-xs text-muted-foreground">
+                                                <Users className="size-3" />
+                                                {names.length}/{s.capacity}
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
-                    );
-                })}
-            </div>
+                    </div>
+                );
+            })}
         </div>
     );
 }

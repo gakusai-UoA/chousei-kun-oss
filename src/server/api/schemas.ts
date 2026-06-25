@@ -158,23 +158,40 @@ const shiftSlotInputSchema = z.object({
     sortOrder: z.number().int().min(0).max(10000).optional().default(0),
 }).refine((s) => s.endsAt > s.startsAt, "endsAt must be after startsAt");
 
-export const createShiftBoardSchema = z.object({
-    title: z.string().trim().min(1).max(200),
-    description: z.string().max(2000).optional().default(""),
-    date: z.number().int(),             // 対象日 JST 0:00 ms
-    submissionDeadline: z.number().int().nullable().optional(),
-    slots: z.array(shiftSlotInputSchema).min(1).max(500),
-    adminPassword: z.string().min(8).max(256),
-    creatorUserId: z.string().uuid().optional(),
-});
+// 日々の収集時間帯（0:00 からの分）。終了 > 開始。
+const dayBandRefine = (v: { dayStartMin: number; dayEndMin: number }) =>
+    v.dayEndMin > v.dayStartMin;
+const dateRangeRefine = (v: { startDate: number; endDate: number }) =>
+    v.endDate >= v.startDate;
 
-export const updateShiftBoardSchema = z.object({
-    title: z.string().trim().min(1).max(200).optional(),
-    description: z.string().max(2000).optional(),
-    date: z.number().int().optional(),
-    submissionDeadline: z.number().int().nullable().optional(),
-    slots: z.array(shiftSlotInputSchema).min(1).max(500).optional(),
-});
+export const createShiftBoardSchema = z
+    .object({
+        title: z.string().trim().min(1).max(200),
+        description: z.string().max(2000).optional().default(""),
+        startDate: z.number().int(), // 開始日 JST 0:00 ms
+        endDate: z.number().int(), // 終了日 JST 0:00 ms（両端含む）
+        dayStartMin: z.number().int().min(0).max(24 * 60),
+        dayEndMin: z.number().int().min(0).max(24 * 60),
+        submissionDeadline: z.number().int().nullable().optional(),
+        // 枠は作成時に無くてもよい（集計段階で追加できる）。
+        slots: z.array(shiftSlotInputSchema).max(500).optional().default([]),
+        adminPassword: z.string().min(8).max(256),
+        creatorUserId: z.string().uuid().optional(),
+    })
+    .refine(dateRangeRefine, "endDate must be >= startDate")
+    .refine(dayBandRefine, "dayEndMin must be > dayStartMin");
+
+export const updateShiftBoardSchema = z
+    .object({
+        title: z.string().trim().min(1).max(200).optional(),
+        description: z.string().max(2000).optional(),
+        startDate: z.number().int().optional(),
+        endDate: z.number().int().optional(),
+        dayStartMin: z.number().int().min(0).max(24 * 60).optional(),
+        dayEndMin: z.number().int().min(0).max(24 * 60).optional(),
+        submissionDeadline: z.number().int().nullable().optional(),
+        slots: z.array(shiftSlotInputSchema).max(500).optional(),
+    });
 
 export const shiftBoardIdParamSchema = z.object({
     id: z.string().uuid(),
@@ -185,13 +202,20 @@ export const ownShiftMemberParamSchema = z.object({
     memberId: z.string().uuid(),
 });
 
-/** メンバーの NG 申告（出られない枠の id 配列）。userId で本人を識別し再提出を許す。 */
+/** メンバーの NG 申告（出られない時間帯のレンジ配列）。userId で本人を識別し再提出を許す。 */
 export const submitShiftMemberSchema = z.object({
     name: z.string().trim().min(1).max(100),
     comment: z.string().max(1000).optional().default(""),
     memberId: z.string().uuid().optional(),
     userId: z.string().uuid().optional(),
-    unavailableSlotIds: z.array(z.string().uuid()).max(500).default([]),
+    unavailableRanges: z
+        .array(
+            z
+                .object({ startsAt: z.number().int(), endsAt: z.number().int() })
+                .refine((r) => r.endsAt > r.startsAt, "endsAt must be after startsAt")
+        )
+        .max(50)
+        .default([]),
 });
 
 /** 管理者による割当の一括置換。(slotId, memberId) のペア配列。 */
