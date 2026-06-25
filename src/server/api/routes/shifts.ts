@@ -134,6 +134,7 @@ shiftsRoutes.post(
             memberId: body.memberId,
             userId: body.userId,
             name: body.name,
+            department: body.department || undefined,
             comment: body.comment || undefined,
             unavailableRanges: body.unavailableRanges,
         });

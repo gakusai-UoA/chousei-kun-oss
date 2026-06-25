@@ -28,6 +28,7 @@ export function ShiftBandTimeline({
     onChange,
     selectedKey,
     onSelect,
+    onActivate,
     backgroundBlocks = [],
 }: {
     axisStartMin: number;
@@ -36,6 +37,8 @@ export function ShiftBandTimeline({
     onChange: (key: string, startMin: number, endMin: number) => void;
     selectedKey?: string | null;
     onSelect?: (key: string) => void;
+    /** クリック（ほぼ移動なし）でバーを「開く」操作。割当ポップアップ等に使う。 */
+    onActivate?: (key: string) => void;
     backgroundBlocks?: { startMin: number; endMin: number; label?: string }[];
 }) {
     const blocksRef = React.useRef(blocks);
@@ -54,7 +57,9 @@ export function ShiftBandTimeline({
         if (!orig) return;
         const o = { s: orig.startMin, e: orig.endMin };
         const dur = o.e - o.s;
+        let moved = false;
         const onMove = (ev: PointerEvent) => {
+            if (Math.abs(ev.clientX - startX) > 3) moved = true;
             const d = snap((ev.clientX - startX) / PX_PER_MIN);
             let s = o.s;
             let en = o.e;
@@ -80,6 +85,8 @@ export function ShiftBandTimeline({
             setDragging(false);
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
+            // ほぼ移動していない＝クリックとみなして activate（割当ポップアップ等）。
+            if (!moved && mode === "move") onActivate?.(key);
         };
         window.addEventListener("pointermove", onMove);
         window.addEventListener("pointerup", onUp);

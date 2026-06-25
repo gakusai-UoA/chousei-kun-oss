@@ -220,6 +220,8 @@ export const shiftMembers = sqliteTable(
             .references(() => shiftBoards.id, { onDelete: "cascade" }),
         userId: text("user_id").references(() => users.id),
         name: text("name").notNull(),
+        /** 部署名（任意）。割当時の絞り込み・グルーピングに使う。 */
+        department: text("department"),
         comment: text("comment"),
         createdAt: integer("created_at").notNull(),
     },

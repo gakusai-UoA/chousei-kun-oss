@@ -43,6 +43,7 @@ export type ShiftPublicView = {
 export type ShiftMemberDetail = {
     id: string;
     name: string;
+    department: string | null;
     comment: string | null;
     unavailableRanges: TimeRange[];
     assignedSlotIds: string[];
@@ -51,6 +52,7 @@ export type ShiftMemberDetail = {
 export type ShiftAdminMember = {
     id: string;
     name: string;
+    department: string | null;
     comment: string | null;
     unavailableRanges: TimeRange[];
 };

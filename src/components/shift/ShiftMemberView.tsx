@@ -44,6 +44,7 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
 
     const [memberId, setMemberId] = React.useState<string | null>(null);
     const [name, setName] = React.useState("");
+    const [department, setDepartment] = React.useState("");
     const [comment, setComment] = React.useState("");
     const [ranges, setRanges] = React.useState<DraftRange[]>([]);
     const [assignedSlotIds, setAssignedSlotIds] = React.useState<Set<string>>(new Set());
@@ -89,6 +90,7 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                 }
                 const m = (await res.json()) as ShiftMemberDetail;
                 setName(m.name);
+                setDepartment(m.department ?? "");
                 setComment(m.comment ?? "");
                 setAssignedSlotIds(new Set(m.assignedSlotIds));
                 const sd = view.board.startDate;
@@ -130,6 +132,7 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     name: name.trim(),
+                    department,
                     comment,
                     memberId: memberId ?? undefined,
                     userId: userId ?? undefined,
@@ -221,16 +224,26 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                     </div>
 
                     <div className="space-y-4">
-                        <Input
-                            className="max-w-md"
-                            placeholder="あなたの名前"
-                            value={name}
-                            onChange={(e) => {
-                                setName(e.target.value);
-                                setSaved(false);
-                            }}
-                            maxLength={100}
-                        />
+                        <div className="grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                            <Input
+                                placeholder="あなたの名前"
+                                value={name}
+                                onChange={(e) => {
+                                    setName(e.target.value);
+                                    setSaved(false);
+                                }}
+                                maxLength={100}
+                            />
+                            <Input
+                                placeholder="部署名（任意）"
+                                value={department}
+                                onChange={(e) => {
+                                    setDepartment(e.target.value);
+                                    setSaved(false);
+                                }}
+                                maxLength={100}
+                            />
+                        </div>
 
                         <ShiftNgEditor
                             days={days}

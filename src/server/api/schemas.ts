@@ -205,6 +205,7 @@ export const ownShiftMemberParamSchema = z.object({
 /** メンバーの NG 申告（出られない時間帯のレンジ配列）。userId で本人を識別し再提出を許す。 */
 export const submitShiftMemberSchema = z.object({
     name: z.string().trim().min(1).max(100),
+    department: z.string().trim().max(100).optional().default(""),
     comment: z.string().max(1000).optional().default(""),
     memberId: z.string().uuid().optional(),
     userId: z.string().uuid().optional(),

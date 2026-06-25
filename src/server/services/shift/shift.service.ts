@@ -230,11 +230,13 @@ export class ShiftService {
         memberId?: string;
         userId?: string;
         name: string;
+        department?: string;
         comment?: string;
         unavailableRanges: TimeRange[];
     }): Promise<{ memberId: string }> {
         const encName = (await encryptPii(input.name))!;
         const encComment = await encryptPii(input.comment ?? null);
+        const department = input.department && input.department.length > 0 ? input.department : null;
         const now = Date.now();
 
         const existing = await this.findMember(input.boardId, {
@@ -247,7 +249,7 @@ export class ShiftService {
             memberId = existing.id;
             await this.db
                 .update(shiftMembers)
-                .set({ name: encName, comment: encComment })
+                .set({ name: encName, department, comment: encComment })
                 .where(eq(shiftMembers.id, memberId));
         } else {
             memberId = crypto.randomUUID();
@@ -256,6 +258,7 @@ export class ShiftService {
                 boardId: input.boardId,
                 userId: input.userId ?? null,
                 name: encName,
+                department,
                 comment: encComment,
                 createdAt: now,
             });
@@ -304,6 +307,7 @@ export class ShiftService {
         return {
             id: member.id,
             name: (await decryptPii(member.name)) ?? "",
+            department: member.department,
             comment: await decryptPii(member.comment),
             unavailableRanges: ranges
                 .slice()
@@ -321,6 +325,7 @@ export class ShiftService {
                 .select({
                     id: shiftMembers.id,
                     name: shiftMembers.name,
+                    department: shiftMembers.department,
                     comment: shiftMembers.comment,
                     createdAt: shiftMembers.createdAt,
                 })
@@ -349,6 +354,7 @@ export class ShiftService {
             memberRows.map(async (m) => ({
                 id: m.id,
                 name: (await decryptPii(m.name)) ?? "",
+                department: m.department,
                 comment: await decryptPii(m.comment),
                 unavailableRanges: (rangesByMember.get(m.id) ?? []).sort(
                     (a, b) => a.startsAt - b.startsAt
