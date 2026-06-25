@@ -158,7 +158,7 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
     const isPublished = board.status === "published";
 
     return (
-        <div className="mx-auto max-w-2xl space-y-6 px-4 py-10">
+        <div className="w-full space-y-6 px-6 py-10 lg:px-12">
             <header className="space-y-1">
                 <h1 className="text-2xl font-bold">{board.title}</h1>
                 <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -197,7 +197,7 @@ export function ShiftMemberView({ boardId }: { boardId: string }) {
                             maxLength={100}
                         />
 
-                        <div className="space-y-2">
+                        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                             {orderedSlots.map((s) => {
                                 const ng = ngSet.has(s.id);
                                 return (
@@ -312,7 +312,7 @@ function PublishedRoster({
                 <CheckCircle2 className="mr-1 inline size-4 text-emerald-600" />
                 シフトが公開されました。あなたの担当枠は強調表示されています。
             </div>
-            <div className="space-y-2">
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {slots.map((s) => {
                     const names = bySlot.get(s.id) ?? [];
                     const mine = myAssigned.has(s.id);

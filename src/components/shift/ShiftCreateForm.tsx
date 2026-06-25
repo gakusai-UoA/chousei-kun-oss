@@ -136,7 +136,7 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
     };
 
     return (
-        <div className="mx-auto max-w-3xl space-y-6 px-4 py-10">
+        <div className="w-full space-y-6 px-6 py-10 lg:px-12">
             <div className="space-y-1">
                 <h1 className="flex items-center gap-2 text-2xl font-bold">
                     <CalendarClock className="size-6 text-primary" />
@@ -155,17 +155,16 @@ export function ShiftCreateForm({ editData }: { editData?: ShiftEditData } = {})
             )}
 
             <div className="space-y-4">
-                <div className="space-y-1.5">
-                    <label className="text-sm font-medium">タイトル</label>
-                    <Input
-                        value={title}
-                        onChange={(e) => setTitle(e.target.value)}
-                        placeholder="例: 前日準備シフト"
-                        maxLength={200}
-                    />
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                    <div className="space-y-1.5 lg:col-span-2">
+                        <label className="text-sm font-medium">タイトル</label>
+                        <Input
+                            value={title}
+                            onChange={(e) => setTitle(e.target.value)}
+                            placeholder="例: 前日準備シフト"
+                            maxLength={200}
+                        />
+                    </div>
                     <div className="space-y-1.5">
                         <label className="text-sm font-medium">対象日</label>
                         <Input type="date" value={dateStr} onChange={(e) => setDateStr(e.target.value)} />

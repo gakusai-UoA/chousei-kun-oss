@@ -277,7 +277,7 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
     };
 
     return (
-        <div className="mx-auto max-w-4xl space-y-6 px-4 py-10">
+        <div className="w-full space-y-6 px-6 py-10 lg:px-12">
             <header className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                     <h1 className="text-2xl font-bold">{board.title}</h1>
@@ -363,7 +363,7 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
                         は本人が「出られない」とした枠で、割当できません。背景が黄色は時間が重複している警告です。
                     </p>
 
-                    <div className="space-y-3">
+                    <div className="grid gap-3 xl:grid-cols-2">
                         {orderedSlots.map((s) => {
                             const assigned = assign.get(s.id) ?? new Set<string>();
                             const over = assigned.size > s.capacity;

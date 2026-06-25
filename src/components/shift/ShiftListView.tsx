@@ -37,7 +37,7 @@ export function ShiftListView() {
     }, [userId]);
 
     return (
-        <div className="mx-auto max-w-2xl space-y-6 px-4 py-10">
+        <div className="w-full space-y-6 px-6 py-10 lg:px-12">
             <div className="flex items-center justify-between">
                 <h1 className="text-2xl font-bold">シフト調整</h1>
                 <Button asChild size="sm" className="gap-1">
@@ -56,7 +56,7 @@ export function ShiftListView() {
                     このデバイスで作成したシフト表はまだありません。
                 </div>
             ) : (
-                <ul className="space-y-2">
+                <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                     {items.map((it) => (
                         <li key={it.id}>
                             <Link
