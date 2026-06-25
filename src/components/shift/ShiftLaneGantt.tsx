@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Plus, Trash2, Clock, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatMinutes, parseHm, snap, SNAP_MINUTES, rangesOverlap } from "@/lib/shift";
+import { formatMinutes, parseHm, snap, SNAP_MINUTES } from "@/lib/shift";
 
 export type Segment = {
     id: string;
@@ -23,8 +23,10 @@ export type Lane = {
 };
 
 const PX_PER_MIN = 2;
-const ROW_H = 56;
 const LABEL_W = 180;
+const SEG_H = 40; // バー高さ
+const SUBROW_H = 46; // 段の高さ（重なり回避時に縦に積む単位）
+const LANE_PAD = 8;
 
 let counter = 0;
 const uid = (prefix: string) => {
@@ -182,21 +184,23 @@ export function ShiftLaneGantt({
 
                     {/* レーン（役割）行 */}
                     {lanes.map((lane) => {
-                        // 同一レーン内の時間重複を検出（赤表示）。
-                        const overlapIds = new Set<string>();
-                        for (let i = 0; i < lane.segments.length; i++)
-                            for (let j = i + 1; j < lane.segments.length; j++)
-                                if (
-                                    rangesOverlap(
-                                        lane.segments[i].startMin,
-                                        lane.segments[i].endMin,
-                                        lane.segments[j].startMin,
-                                        lane.segments[j].endMin
-                                    )
-                                ) {
-                                    overlapIds.add(lane.segments[i].id);
-                                    overlapIds.add(lane.segments[j].id);
-                                }
+                        // 時間が重なる区分は重ならない「段」に振り分ける（貪欲法）。
+                        const trackOf = new Map<string, number>();
+                        const trackEnds: number[] = [];
+                        for (const s of [...lane.segments].sort(
+                            (a, b) => a.startMin - b.startMin || a.endMin - b.endMin
+                        )) {
+                            let t = trackEnds.findIndex((end) => end <= s.startMin);
+                            if (t === -1) {
+                                t = trackEnds.length;
+                                trackEnds.push(s.endMin);
+                            } else {
+                                trackEnds[t] = s.endMin;
+                            }
+                            trackOf.set(s.id, t);
+                        }
+                        const trackCount = Math.max(1, trackEnds.length);
+                        const laneH = trackCount * SUBROW_H + LANE_PAD;
                         return (
                             <div key={lane.laneId} className="flex border-b last:border-b-0">
                                 <div
@@ -237,7 +241,7 @@ export function ShiftLaneGantt({
                                         <Trash2 className="size-3.5 text-destructive" />
                                     </Button>
                                 </div>
-                                <div className="relative" style={{ width: trackW, height: ROW_H }}>
+                                <div className="relative" style={{ width: trackW, height: laneH }}>
                                     {hourTicks.map((m) => (
                                         <div
                                             key={m}
@@ -248,46 +252,43 @@ export function ShiftLaneGantt({
                                     {lane.segments.map((s) => {
                                         const left = (s.startMin - axisStartMin) * PX_PER_MIN;
                                         const width = (s.endMin - s.startMin) * PX_PER_MIN;
-                                        const bad = overlapIds.has(s.id);
+                                        const top = (trackOf.get(s.id) ?? 0) * SUBROW_H + LANE_PAD / 2;
                                         const ac = assignedCount?.(s.id);
                                         // 割当状況で色分け（未割当=赤 / 一部=青 / 定員ちょうど=緑 / 超過=黄）。
-                                        const status = bad
-                                            ? "bad"
-                                            : ac == null
-                                              ? "plain"
-                                              : ac > s.capacity
-                                                ? "over"
-                                                : ac === s.capacity
-                                                  ? "full"
-                                                  : ac === 0
-                                                    ? "empty"
-                                                    : "partial";
+                                        const status =
+                                            ac == null
+                                                ? "plain"
+                                                : ac > s.capacity
+                                                  ? "over"
+                                                  : ac === s.capacity
+                                                    ? "full"
+                                                    : ac === 0
+                                                      ? "empty"
+                                                      : "partial";
                                         const tone = {
-                                            bad: "border-destructive bg-destructive/15 text-destructive",
                                             over: "border-amber-500 bg-amber-400/30 text-amber-900",
                                             full: "border-emerald-500 bg-emerald-500/20 text-emerald-900",
                                             empty: "border-rose-300 bg-rose-50 text-rose-700",
                                             partial: "border-primary bg-primary/15 text-foreground",
                                             plain: "border-primary/50 bg-primary/15 text-foreground",
                                         }[status];
-                                        const handle = bad
-                                            ? "bg-destructive/40"
-                                            : status === "full"
-                                              ? "bg-emerald-500/50"
-                                              : status === "empty"
-                                                ? "bg-rose-300"
-                                                : status === "over"
-                                                  ? "bg-amber-500/50"
-                                                  : "bg-primary/40";
+                                        const handle =
+                                            status === "full"
+                                                ? "bg-emerald-500/50"
+                                                : status === "empty"
+                                                  ? "bg-rose-300"
+                                                  : status === "over"
+                                                    ? "bg-amber-500/50"
+                                                    : "bg-primary/40";
                                         return (
                                             <div
                                                 key={s.id}
                                                 onPointerDown={(e) => beginDrag(e, lane.laneId, s.id, "move")}
                                                 className={cn(
-                                                    "group absolute top-1.5 flex cursor-grab touch-none select-none items-stretch overflow-hidden rounded-md border shadow-sm",
+                                                    "group absolute flex cursor-grab touch-none select-none items-stretch overflow-hidden rounded-md border shadow-sm",
                                                     tone
                                                 )}
-                                                style={{ left, width, height: ROW_H - 14 }}
+                                                style={{ left, width, top, height: SEG_H }}
                                                 title={`${formatMinutes(s.startMin)}–${formatMinutes(s.endMin)}${
                                                     ac != null ? ` / ${ac}人 (定員${s.capacity})` : ""
                                                 }`}
