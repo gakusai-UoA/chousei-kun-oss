@@ -31,6 +31,7 @@ import {
     type ShiftAdminView as AdminView,
 } from "@/lib/shift";
 import { ShiftLaneGantt, type Lane } from "./ShiftLaneGantt";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type Phase = "loading" | "auth" | "ready" | "error";
 
@@ -53,6 +54,7 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
     const [publishing, setPublishing] = React.useState(false);
     const [copied, setCopied] = React.useState(false);
     const [activeDay, setActiveDay] = React.useState(0);
+    const [confirmDelete, setConfirmDelete] = React.useState(false);
 
     const hydrate = (view: AdminView) => {
         const byDay: Record<number, Map<string, Lane>> = {};
@@ -254,8 +256,7 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
         }
     };
 
-    const handleDelete = async () => {
-        if (!confirm("このシフト表を削除しますか？この操作は元に戻せません。")) return;
+    const doDelete = async () => {
         const res = await fetch(`/api/shifts/${boardId}`, { method: "DELETE" });
         if (res.ok) window.location.href = "/shifts";
         else setErrorMsg("削除に失敗しました。");
@@ -553,7 +554,7 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
                         {copied ? <Check className="size-4" /> : <Link2 className="size-4" />}
                         {copied ? "コピーしました" : "共有リンク"}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={handleDelete} className="gap-1 text-destructive">
+                    <Button variant="outline" size="sm" onClick={() => setConfirmDelete(true)} className="gap-1 text-destructive">
                         <Trash2 className="size-4" /> 削除
                     </Button>
                 </div>
@@ -608,6 +609,14 @@ export function ShiftAdminView({ boardId }: { boardId: string }) {
                 onChange={(lanes) => setLanesForDay(day, lanes)}
                 assignedCount={assignedCount}
                 renderSegmentAssign={renderSegmentAssign}
+            />
+
+            <ConfirmDialog
+                open={confirmDelete}
+                onOpenChange={setConfirmDelete}
+                title="このシフト表を削除しますか？"
+                description="この操作は元に戻せません。"
+                onConfirm={doDelete}
             />
         </div>
     );

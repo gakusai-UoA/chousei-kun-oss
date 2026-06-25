@@ -4,6 +4,7 @@ import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Plus, Trash2, Clock, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatMinutes, parseHm, snap, SNAP_MINUTES, rangesOverlap } from "@/lib/shift";
@@ -63,6 +64,17 @@ export function ShiftLaneGantt({
     const lanesRef = React.useRef(lanes);
     lanesRef.current = lanes;
     const [editing, setEditing] = React.useState<{ laneId: string; segId: string } | null>(null);
+    const [pending, setPending] = React.useState<{ title: string; description?: string; run: () => void } | null>(
+        null
+    );
+    // Ctrl/⌘ + クリックなら確認なしで実行、それ以外は shadcn の確認ダイアログを出す。
+    const ask = (e: React.MouseEvent, c: { title: string; description?: string }, run: () => void) => {
+        if (e.metaKey || e.ctrlKey) {
+            run();
+            return;
+        }
+        setPending({ ...c, run });
+    };
 
     const span = Math.max(1, axisEndMin - axisStartMin);
     const trackW = span * PX_PER_MIN;
@@ -211,16 +223,16 @@ export function ShiftLaneGantt({
                                         variant="ghost"
                                         size="icon-xs"
                                         title="この行（役割）を削除（Ctrl/⌘+クリックで確認なし）"
-                                        onClick={(e) => {
-                                            if (
-                                                e.metaKey ||
-                                                e.ctrlKey ||
-                                                window.confirm(
-                                                    `「${lane.role || "この行"}」を削除しますか？\n含まれる時間区分もすべて削除されます。`
-                                                )
+                                        onClick={(e) =>
+                                            ask(
+                                                e,
+                                                {
+                                                    title: `「${lane.role || "この行"}」を削除しますか？`,
+                                                    description: "含まれる時間区分もすべて削除されます。",
+                                                },
+                                                () => removeLane(lane.laneId)
                                             )
-                                                removeLane(lane.laneId);
-                                        }}
+                                        }
                                     >
                                         <Trash2 className="size-3.5 text-destructive" />
                                     </Button>
@@ -396,12 +408,9 @@ export function ShiftLaneGantt({
                                     size="sm"
                                     title="Ctrl/⌘+クリックで確認なし"
                                     onClick={(e) => {
-                                        if (
-                                            e.metaKey ||
-                                            e.ctrlKey ||
-                                            window.confirm("この時間区分を削除しますか？")
-                                        )
-                                            removeSegment(editing.laneId, editingSeg.id);
+                                        const lid = editing.laneId;
+                                        const sid = editingSeg.id;
+                                        ask(e, { title: "この時間区分を削除しますか？" }, () => removeSegment(lid, sid));
                                     }}
                                     className="gap-1 text-destructive"
                                 >
@@ -415,6 +424,14 @@ export function ShiftLaneGantt({
                     )}
                 </DialogContent>
             </Dialog>
+
+            <ConfirmDialog
+                open={!!pending}
+                onOpenChange={(o) => !o && setPending(null)}
+                title={pending?.title ?? ""}
+                description={pending?.description}
+                onConfirm={() => pending?.run()}
+            />
         </div>
     );
 }
