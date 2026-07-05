@@ -104,3 +104,5 @@ See `.env.example` and `wrangler.jsonc.example` for the exact variable names and
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+<!-- ci-verify: 2026-07-05T12:55:52Z -->
