@@ -1,0 +1,784 @@
+import { Hono } from "hono";
+import { sValidator } from "@hono/standard-validator";
+import { eq } from "drizzle-orm";
+import { createPasswordHash, verifyPassword } from "@/lib/admin-auth";
+import { createDb } from "@/server/db/client";
+import { availabilities, events, participants } from "@/server/db/schema";
+import {
+    createEventSchema,
+    eventIdParamSchema,
+    participateSchema,
+    adminAuthSchema,
+    adminUpdateSchema,
+    confirmCandidateSchema,
+    addToCalendarSchema,
+    updateNotificationSchema,
+    ownParticipantParamSchema,
+} from "../schemas";
+import {
+    parseCookieValue,
+    refreshGoogleTokenIfNeeded,
+    parseCandidateWindow,
+} from "../utils";
+import { verifyAdminSession, isSameOrigin } from "../middleware";
+import { enforceRateLimit, clientIp, type RateLimitBinding } from "../rate-limit";
+import { safeJsonParse } from "@/lib/safe-json";
+import { redactPii } from "@/lib/redact";
+import { encryptPii, decryptPii } from "@/lib/pii-crypto";
+import { captureException } from "@/lib/wana";
+
+type Bindings = {
+    DB: D1Database;
+    AUTH_RATE_LIMITER?: RateLimitBinding;
+    WRITE_RATE_LIMITER?: RateLimitBinding;
+};
+
+export const eventsRoutes = new Hono<{ Bindings: Bindings }>();
+
+// CSRF: 状態変更系（POST/PATCH/DELETE）には Origin/Referer の同一オリジン検証を
+// 必須化する。SameSite=Strict cookie と二重防御。GET/HEAD は影響なし。
+eventsRoutes.use("*", async (c, next) => {
+    const method = c.req.method;
+    if (method === "POST" || method === "PATCH" || method === "DELETE" || method === "PUT") {
+        if (!isSameOrigin(c)) {
+            return c.json({ error: "Cross-origin request rejected" }, 403);
+        }
+    }
+    return next();
+});
+
+/**
+ * 参加者の availability を入力 statuses（candidate_idx 0..N-1）でまるごと取り替える。
+ *
+ * (participant_id, candidate_idx) は複合主キーなので UPSERT で「あれば更新・無ければ
+ * 挿入」を冪等に行える。最後に candidate_idx >= statuses.length の行を消すことで、
+ * 候補数が減ったケース（管理者が候補を削除した等）の残存行も掃除する。すべて 1 つの
+ * batch() に載せ、単一 RPC・原子的に適用する。
+ *
+ * D1 のバインドパラメータ上限は 1 クエリ 100 個。UPSERT は 1 行 3 binds なので
+ * 1 チャンク 30 行 = 90 binds に抑える。
+ */
+const REPLACE_AVAILABILITY_CHUNK = 30;
+async function replaceAvailabilities(
+    d1: D1Database,
+    participantId: string,
+    statuses: number[]
+): Promise<void> {
+    const statements: D1PreparedStatement[] = [];
+    for (let i = 0; i < statuses.length; i += REPLACE_AVAILABILITY_CHUNK) {
+        const chunk = statuses.slice(i, i + REPLACE_AVAILABILITY_CHUNK);
+        const placeholders = chunk.map(() => "(?, ?, ?)").join(", ");
+        const binds: (string | number)[] = [];
+        chunk.forEach((status, k) => {
+            binds.push(participantId, i + k, status);
+        });
+        statements.push(
+            d1
+                .prepare(
+                    `INSERT INTO availabilities (participant_id, candidate_idx, status) VALUES ${placeholders}
+                     ON CONFLICT(participant_id, candidate_idx) DO UPDATE SET status = excluded.status`
+                )
+                .bind(...binds)
+        );
+    }
+    // 候補数が減った場合に旧 index の行が残らないよう末尾を掃除する。
+    // statuses が空なら candidate_idx >= 0、すなわち全行削除になる。
+    statements.push(
+        d1
+            .prepare("DELETE FROM availabilities WHERE participant_id = ? AND candidate_idx >= ?")
+            .bind(participantId, statuses.length)
+    );
+    await d1.batch(statements);
+}
+
+
+eventsRoutes.post("/", sValidator("json", createEventSchema), async (c) => {
+    const db = createDb(c.env.DB);
+    const { title, description, candidates, adminPassword, creatorUserId } = c.req.valid("json");
+    const id = crypto.randomUUID();
+    const createdAt = Date.now();
+    const adminPasswordHash = await createPasswordHash(adminPassword);
+    const adminAccessToken = crypto.randomUUID();
+
+    await db.insert(events).values({
+        id,
+        title,
+        description: description || null,
+        candidates: JSON.stringify(candidates),
+        createdAt,
+        adminPasswordHash,
+        adminAccessToken,
+        createdByUserId: creatorUserId ?? null,
+    });
+
+    return c.json({ id }, 201);
+});
+
+/**
+ * デバイスに保存された userId を持つ作成者向けの、自分が作ったイベント一覧。
+ * 認証は持たず userId をそのままキーにする（同 userId を持つ別デバイスからも
+ * 同じ一覧が見える設計）。回答内容など参加者の PII は含めない。
+ */
+eventsRoutes.get("/by-creator/:userId", async (c) => {
+    const userId = c.req.param("userId");
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+        return c.json({ error: "Invalid userId" }, 400);
+    }
+    const db = createDb(c.env.DB);
+    const rows = await db.select({
+        id: events.id,
+        title: events.title,
+        description: events.description,
+        createdAt: events.createdAt,
+        confirmedCandidateIdx: events.confirmedCandidateIdx,
+    }).from(events).where(eq(events.createdByUserId, userId));
+    return c.json({ items: rows.sort((a, b) => b.createdAt - a.createdAt) });
+});
+
+eventsRoutes.get("/:id", sValidator("param", eventIdParamSchema), async (c) => {
+    const db = createDb(c.env.DB);
+    const { id } = c.req.valid("param");
+
+    const event = await db.query.events.findFirst({
+        where: eq(events.id, id),
+        columns: {
+            id: true,
+            title: true,
+            description: true,
+            candidates: true,
+            confirmedCandidateIdx: true,
+        },
+    });
+
+    if (!event) return c.json({ error: "Event not found" }, 404);
+
+    // 参加者の通知メール等のPIIは公開エンドポイントで返さない。回答集計に必要な列のみ。
+    // participants と availabilities は独立しているため並列取得する。
+    const [participantRows, availabilityRows] = await Promise.all([
+        db
+            .select({
+                id: participants.id,
+                name: participants.name,
+                comment: participants.comment,
+            })
+            .from(participants)
+            .where(eq(participants.eventId, id)),
+        db
+            .select({
+                participantId: availabilities.participantId,
+                candidateIdx: availabilities.candidateIdx,
+                status: availabilities.status,
+            })
+            .from(availabilities)
+            .innerJoin(participants, eq(availabilities.participantId, participants.id))
+            .where(eq(participants.eventId, id)),
+    ]);
+
+    // 参加者の name/comment は AES-GCM で暗号化保存されている可能性があるので
+    // 復号して返す。旧来の平文行はそのまま返る。
+    const decryptedParticipants = await Promise.all(
+        participantRows.map(async (p) => ({
+            id: p.id,
+            name: (await decryptPii(p.name)) ?? "",
+            comment: await decryptPii(p.comment),
+        }))
+    );
+
+    return c.json({
+        event: {
+            ...event,
+            candidates: safeJsonParse<string[]>(event.candidates, "events.candidates") ?? [],
+        },
+        participants: decryptedParticipants,
+        availabilities: availabilityRows,
+    });
+});
+
+// 参加者自身の編集用に、自分のレコードのみ返す（イベント所属を検証）。
+// participantId を知っている本人のみが取得できるため、一覧での PII 一括露出を避ける。
+eventsRoutes.get(
+    "/:id/participant/:participantId",
+    sValidator("param", ownParticipantParamSchema),
+    async (c) => {
+        const db = createDb(c.env.DB);
+        const { id, participantId } = c.req.valid("param");
+        const row = await db.query.participants.findFirst({
+            where: eq(participants.id, participantId),
+            columns: {
+                eventId: true,
+                name: true,
+                comment: true,
+                notifyOnFinalize: true,
+                notificationEmail: true,
+            },
+        });
+        if (!row || row.eventId !== id) {
+            return c.json({ error: "Participant not found" }, 404);
+        }
+        return c.json({
+            name: (await decryptPii(row.name)) ?? "",
+            comment: await decryptPii(row.comment),
+            notifyOnFinalize: row.notifyOnFinalize,
+            notificationEmail: await decryptPii(row.notificationEmail),
+        });
+    }
+);
+
+eventsRoutes.post(
+    "/:id/participate",
+    sValidator("param", eventIdParamSchema),
+    sValidator("json", participateSchema),
+    async (c) => {
+        const { id: eventId } = c.req.valid("param");
+        // 連投・PII スパム対策（イベント+IP）。AUTH より緩いリミッタを使用。
+        const allowed = await enforceRateLimit(c.env.WRITE_RATE_LIMITER, `participate:${eventId}:${clientIp(c)}`);
+        if (!allowed) {
+            return c.json({ error: "回答の送信が多すぎます。しばらくしてから再度お試しください。" }, 429);
+        }
+        const db = createDb(c.env.DB);
+        const { name, comment, availabilities: statuses, participantId, userId, notifyOnFinalize, notificationEmail } = c.req.valid("json");
+        const cookieHeader = c.req.header("cookie") ?? "";
+        const googleSessionId = parseCookieValue(cookieHeader, "chousei_google_session");
+        const googleSession = googleSessionId ? await refreshGoogleTokenIfNeeded(db, googleSessionId) : null;
+
+        const normalizedComment = comment || null;
+        const normalizedNotificationEmail = notificationEmail?.trim() ? notificationEmail.trim() : (googleSession?.email ?? null);
+        const effectiveNotifyOnFinalize = notifyOnFinalize || !!googleSession?.email;
+        if (effectiveNotifyOnFinalize && !normalizedNotificationEmail) {
+            return c.json({ error: "通知を受け取る場合はメールアドレスが必要です" }, 400);
+        }
+        const newParticipantId = participantId ?? crypto.randomUUID();
+
+        // PII は保存時に AES-GCM で暗号化（読み出し側で復号）。
+        const encName = (await encryptPii(name))!;
+        const encComment = await encryptPii(normalizedComment);
+        const encEmail = await encryptPii(normalizedNotificationEmail);
+
+        if (participantId) {
+            const existing = await db.query.participants.findFirst({
+                where: eq(participants.id, participantId),
+                columns: { eventId: true },
+            });
+            if (!existing || existing.eventId !== eventId) {
+                return c.json({ error: "Participant not found" }, 404);
+            }
+            await db
+                .update(participants)
+                .set({
+                    name: encName,
+                    comment: encComment,
+                    userId: userId ?? null,
+                    notifyOnFinalize: effectiveNotifyOnFinalize ? 1 : 0,
+                    notificationEmail: encEmail,
+                })
+                .where(eq(participants.id, participantId));
+        } else {
+            await db.insert(participants).values({
+                id: newParticipantId,
+                eventId,
+                userId: userId ?? null,
+                name: encName,
+                comment: encComment,
+                notifyOnFinalize: effectiveNotifyOnFinalize ? 1 : 0,
+                notificationEmail: encEmail,
+            });
+        }
+
+        // 新規・既存いずれも UPSERT で取り替える。新規は競合が無いので実質 INSERT。
+        await replaceAvailabilities(c.env.DB, newParticipantId, statuses);
+
+        return c.json({ success: true, participantId: newParticipantId });
+    }
+);
+
+eventsRoutes.post(
+    "/:id/notification",
+    sValidator("param", eventIdParamSchema),
+    sValidator("json", updateNotificationSchema),
+    async (c) => {
+        const db = createDb(c.env.DB);
+        const { id: eventId } = c.req.valid("param");
+        const { participantId, notifyOnFinalize, notificationEmail } = c.req.valid("json");
+
+        const participant = await db.query.participants.findFirst({
+            where: eq(participants.id, participantId),
+        });
+
+        if (!participant || participant.eventId !== eventId) {
+            return c.json({ error: "Participant not found" }, 404);
+        }
+
+        const normalizedEmail = notificationEmail?.trim() || null;
+        if (notifyOnFinalize && !normalizedEmail) {
+            return c.json({ error: "通知を受け取る場合はメールアドレスが必要です" }, 400);
+        }
+
+        await db
+            .update(participants)
+            .set({
+                notifyOnFinalize: notifyOnFinalize ? 1 : 0,
+                notificationEmail: await encryptPii(normalizedEmail),
+            })
+            .where(eq(participants.id, participantId));
+
+        return c.json({ success: true });
+    }
+);
+
+eventsRoutes.post(
+    "/:id/admin-auth",
+    sValidator("param", eventIdParamSchema),
+    sValidator("json", adminAuthSchema),
+    async (c) => {
+        const db = createDb(c.env.DB);
+        const { id } = c.req.valid("param");
+        const { password } = c.req.valid("json");
+
+        // パスワード総当たり対策（イベント+IP単位）
+        const allowed = await enforceRateLimit(c.env.AUTH_RATE_LIMITER, `auth:${id}:${clientIp(c)}`);
+        if (!allowed) {
+            return c.json({ error: "試行回数が多すぎます。しばらくしてから再度お試しください。" }, 429);
+        }
+
+        const event = await db.query.events.findFirst({
+            where: eq(events.id, id),
+            columns: {
+                adminPasswordHash: true,
+                adminAccessToken: true,
+            },
+        });
+        if (!event) return c.json({ error: "Event not found" }, 404);
+
+        const result = await verifyPassword(password, event.adminPasswordHash);
+        if (!result.ok || !event.adminAccessToken) return c.json({ error: "Invalid password" }, 401);
+
+        // 旧形式ハッシュなら現行 PBKDF2 で再ハッシュして昇格させる。
+        if (result.needsRehash) {
+            try {
+                const upgraded = await createPasswordHash(password);
+                await db.update(events).set({ adminPasswordHash: upgraded }).where(eq(events.id, id));
+            } catch (e) {
+                console.error("[admin-auth] hash upgrade failed:", e);
+            }
+        }
+
+        c.header(
+            "Set-Cookie",
+            `chousei_admin_${id}=${event.adminAccessToken}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=2592000`
+        );
+        return c.json({ ok: true });
+    }
+);
+
+/**
+ * 管理者: イベントを完全削除（カスケード）。
+ * D1 batch で参加者・回答・本体を一括削除する。GDPR 的な「忘れられる権利」の
+ * ためにも、admin 認証済みの本人が即時に削除できる手段を残しておく。
+ */
+eventsRoutes.delete(
+    "/:id",
+    sValidator("param", eventIdParamSchema),
+    async (c) => {
+        const { id } = c.req.valid("param");
+        const auth = await verifyAdminSession(c, id);
+        if (!auth.authorized) return c.json({ error: auth.error }, 401);
+
+        await c.env.DB.batch([
+            c.env.DB.prepare(
+                `DELETE FROM availabilities
+                 WHERE participant_id IN (SELECT id FROM participants WHERE event_id = ?)`
+            ).bind(id),
+            c.env.DB.prepare(`DELETE FROM participants WHERE event_id = ?`).bind(id),
+            c.env.DB.prepare(`DELETE FROM events WHERE id = ?`).bind(id),
+        ]);
+
+        // admin cookie もクリア
+        c.header(
+            "Set-Cookie",
+            `chousei_admin_${id}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`
+        );
+        return c.json({ ok: true });
+    }
+);
+
+/**
+ * 管理者: 既存イベントを複製。タイトル末尾に「（コピー）」を付ける。
+ * 候補日程・説明・通知設定（の元値）はコピー、回答はコピーしない。
+ * 新しい管理者アクセストークン・パスワードハッシュは元のものをそのまま流用
+ * （= 元の管理者がそのまま新イベントも管理できる）。
+ */
+eventsRoutes.post(
+    "/:id/admin/duplicate",
+    sValidator("param", eventIdParamSchema),
+    async (c) => {
+        try {
+            const db = createDb(c.env.DB);
+            const { id } = c.req.valid("param");
+            const auth = await verifyAdminSession(c, id);
+            if (!auth.authorized) return c.json({ error: auth.error }, 401);
+
+            const src = await db.query.events.findFirst({
+                where: eq(events.id, id),
+                columns: {
+                    title: true,
+                    description: true,
+                    candidates: true,
+                    adminPasswordHash: true,
+                    adminAccessToken: true,
+                    createdByUserId: true,
+                },
+            });
+            if (!src) return c.json({ error: "Event not found" }, 404);
+
+            const newId = crypto.randomUUID();
+            await db.insert(events).values({
+                id: newId,
+                title: `${src.title}（コピー）`,
+                description: src.description,
+                candidates: src.candidates,
+                createdAt: Date.now(),
+                adminPasswordHash: src.adminPasswordHash,
+                adminAccessToken: src.adminAccessToken,
+                createdByUserId: src.createdByUserId,
+            });
+            
+            c.header(
+                "Set-Cookie",
+                `chousei_admin_${newId}=${src.adminAccessToken}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=2592000`
+            );
+            console.log(`[duplicate-event] duplicated event ${id} -> ${newId}`);
+            return c.json({ id: newId }, 201);
+        }
+        catch (e) {
+            console.error("[duplicate-event] error:", e);
+            const report = captureException(e, {
+                tags: { source: "duplicate-event" },
+                request: { method: c.req.method, url: c.req.url },
+            });
+            try {
+                c.executionCtx.waitUntil(report);
+            } catch {
+                void report;
+            }
+            return c.json({ error: "Internal Server Error" }, 500);
+        }
+    }
+);
+
+/**
+ * 管理者: 参加者の回答を CSV としてダウンロード。
+ * 列: 名前, メール, コメント, 候補1..N（○ / △ / × / -）
+ */
+eventsRoutes.get(
+    "/:id/admin/export.csv",
+    sValidator("param", eventIdParamSchema),
+    async (c) => {
+        const db = createDb(c.env.DB);
+        const { id } = c.req.valid("param");
+        const auth = await verifyAdminSession(c, id);
+        if (!auth.authorized) return c.json({ error: auth.error }, 401);
+
+        const event = await db.query.events.findFirst({
+            where: eq(events.id, id),
+            columns: { title: true, candidates: true },
+        });
+        if (!event) return c.json({ error: "Event not found" }, 404);
+        const candidates = safeJsonParse<string[]>(event.candidates, "events.candidates") ?? [];
+
+        const [participantRows, availabilityRows] = await Promise.all([
+            db.select({
+                id: participants.id,
+                name: participants.name,
+                notificationEmail: participants.notificationEmail,
+                comment: participants.comment,
+            }).from(participants).where(eq(participants.eventId, id)),
+            db.select({
+                participantId: availabilities.participantId,
+                candidateIdx: availabilities.candidateIdx,
+                status: availabilities.status,
+            }).from(availabilities)
+                .innerJoin(participants, eq(availabilities.participantId, participants.id))
+                .where(eq(participants.eventId, id)),
+        ]);
+
+        // (pid, idx) → status
+        const statusMap = new Map<string, number>();
+        for (const a of availabilityRows) statusMap.set(`${a.participantId}:${a.candidateIdx}`, a.status);
+
+        // status: 0=× / 1=△ / 2=○（EventView と同じ正準マッピング）。未回答は "-"。
+        const symbolFor = (s: number | undefined) => {
+            if (s === 0) return "×";
+            if (s === 1) return "△";
+            if (s === 2) return "○";
+            return "-";
+        };
+
+        const escapeCsv = (v: string) => {
+            if (/[",\n\r]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
+            return v;
+        };
+
+        const header = ["名前", "メール", "コメント", ...candidates.map((_, i) => `候補${i + 1}`)];
+        const lines = [header.map(escapeCsv).join(",")];
+
+        for (const p of participantRows) {
+            const name = (await decryptPii(p.name)) ?? "";
+            const email = (await decryptPii(p.notificationEmail)) ?? "";
+            const comment = (await decryptPii(p.comment)) ?? "";
+            const cols = [
+                name,
+                email,
+                comment,
+                ...candidates.map((_, i) => symbolFor(statusMap.get(`${p.id}:${i}`))),
+            ];
+            lines.push(cols.map(escapeCsv).join(","));
+        }
+
+        // BOM 付きで Excel が UTF-8 として開けるようにする。
+        const body = "﻿" + lines.join("\r\n");
+        const filename = `${event.title.replace(/[\\/:*?"<>|]+/g, "_")}_responses.csv`;
+        return new Response(body, {
+            headers: {
+                "Content-Type": "text/csv; charset=utf-8",
+                "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+            },
+        });
+    }
+);
+
+eventsRoutes.post(
+    "/:id/admin-logout",
+    sValidator("param", eventIdParamSchema),
+    async (c) => {
+        const { id } = c.req.valid("param");
+        c.header(
+            "Set-Cookie",
+            `chousei_admin_${id}=; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=0`
+        );
+        return c.json({ ok: true });
+    }
+);
+
+eventsRoutes.patch(
+    "/:id/admin",
+    sValidator("param", eventIdParamSchema),
+    sValidator("json", adminUpdateSchema),
+    async (c) => {
+        const db = createDb(c.env.DB);
+        const { id } = c.req.valid("param");
+        const { title, description, candidates: nextCandidates } = c.req.valid("json");
+
+        const auth = await verifyAdminSession(c, id);
+        if (!auth.authorized) return c.json({ error: auth.error }, 401);
+
+        const currentEvent = await db.query.events.findFirst({
+            where: eq(events.id, id),
+            columns: {
+                id: true,
+                candidates: true,
+            },
+        });
+        if (!currentEvent) return c.json({ error: "Event not found" }, 404);
+
+        const oldCandidates = safeJsonParse<string[]>(currentEvent.candidates, "events.candidates") ?? [];
+        const indexMap = new Map<string, number>();
+        nextCandidates.forEach((candidate, idx) => {
+            indexMap.set(candidate, idx);
+        });
+
+        const availabilityRows = await c.env.DB.prepare(
+            `SELECT a.participant_id, a.candidate_idx, a.status
+             FROM availabilities a
+             JOIN participants p ON p.id = a.participant_id
+             WHERE p.event_id = ?`
+        ).bind(id).all<{ participant_id: string; candidate_idx: number; status: number }>();
+
+        const remappedValues: Array<{ participantId: string; candidateIdx: number; status: number }> = [];
+        for (const row of availabilityRows.results) {
+            const oldCandidate = oldCandidates[row.candidate_idx];
+            if (!oldCandidate) continue;
+            const newIdx = indexMap.get(oldCandidate);
+            if (newIdx === undefined) continue;
+            remappedValues.push({
+                participantId: row.participant_id,
+                candidateIdx: newIdx,
+                status: row.status,
+            });
+        }
+
+        // Drop & re-insert を batch() で原子化。途中失敗で availability が
+        // 消えたまま残るリスクを避ける。
+        const statements: D1PreparedStatement[] = [
+            c.env.DB.prepare(
+                `DELETE FROM availabilities
+                 WHERE participant_id IN (SELECT id FROM participants WHERE event_id = ?)`
+            ).bind(id),
+        ];
+        for (let i = 0; i < remappedValues.length; i += REPLACE_AVAILABILITY_CHUNK) {
+            const chunk = remappedValues.slice(i, i + REPLACE_AVAILABILITY_CHUNK);
+            const placeholders = chunk.map(() => "(?, ?, ?)").join(", ");
+            const binds: (string | number)[] = [];
+            chunk.forEach((row) => {
+                binds.push(row.participantId, row.candidateIdx, row.status);
+            });
+            statements.push(
+                c.env.DB.prepare(
+                    `INSERT INTO availabilities (participant_id, candidate_idx, status) VALUES ${placeholders}`
+                ).bind(...binds)
+            );
+        }
+        statements.push(
+            c.env.DB.prepare(
+                `UPDATE events SET title = ?, description = ?, candidates = ? WHERE id = ?`
+            ).bind(title, description || null, JSON.stringify(nextCandidates), id)
+        );
+        await c.env.DB.batch(statements);
+
+        return c.json({ ok: true });
+    }
+);
+
+eventsRoutes.post(
+    "/:id/admin/confirm",
+    sValidator("param", eventIdParamSchema),
+    sValidator("json", confirmCandidateSchema),
+    async (c) => {
+        const db = createDb(c.env.DB);
+        const { id } = c.req.valid("param");
+        const { confirmedCandidateIdx } = c.req.valid("json");
+
+        const auth = await verifyAdminSession(c, id);
+        if (!auth.authorized) return c.json({ error: auth.error }, 401);
+
+        const currentEvent = await db.query.events.findFirst({
+            where: eq(events.id, id),
+            columns: {
+                candidates: true,
+            },
+        });
+        if (!currentEvent) return c.json({ error: "Event not found" }, 404);
+
+        const candidates = safeJsonParse<string[]>(currentEvent.candidates, "events.candidates") ?? [];
+        if (confirmedCandidateIdx !== null && confirmedCandidateIdx >= candidates.length) {
+            return c.json({ error: "Invalid confirmed candidate index" }, 400);
+        }
+
+        await db
+            .update(events)
+            .set({ confirmedCandidateIdx })
+            .where(eq(events.id, id));
+
+        return c.json({ ok: true });
+    }
+);
+
+eventsRoutes.post(
+    "/:id/admin/add-to-calendar",
+    sValidator("param", eventIdParamSchema),
+    sValidator("json", addToCalendarSchema),
+    async (c) => {
+        const db = createDb(c.env.DB);
+        const { id } = c.req.valid("param");
+        const { confirmedCandidateIdx } = c.req.valid("json");
+
+        const auth = await verifyAdminSession(c, id);
+        if (!auth.authorized) return c.json({ error: auth.error }, 401);
+
+        const cookie = c.req.header("cookie") ?? "";
+        const currentEvent = await db.query.events.findFirst({
+            where: eq(events.id, id),
+            columns: {
+                candidates: true,
+                title: true,
+                description: true,
+            },
+        });
+        if (!currentEvent) return c.json({ error: "Event not found" }, 404);
+
+        const candidates = safeJsonParse<string[]>(currentEvent.candidates, "events.candidates") ?? [];
+        if (confirmedCandidateIdx >= candidates.length) {
+            return c.json({ error: "Invalid confirmed candidate index" }, 400);
+        }
+
+        const googleSessionId = parseCookieValue(cookie, "chousei_google_session");
+        if (!googleSessionId) {
+            return c.json({ error: "Google session not found" }, 401);
+        }
+        const googleSession = await refreshGoogleTokenIfNeeded(db, googleSessionId);
+        if (!googleSession) {
+            return c.json({ error: "Google session not found" }, 401);
+        }
+
+        const selectedCandidate = candidates[confirmedCandidateIdx];
+        const candidateWindow = selectedCandidate ? parseCandidateWindow(selectedCandidate) : null;
+        if (!candidateWindow) {
+            return c.json({ error: "Failed to parse confirmed schedule window" }, 400);
+        }
+
+        const recipients = await db.query.participants.findMany({
+            where: eq(participants.eventId, id),
+            columns: {
+                name: true,
+                notifyOnFinalize: true,
+                notificationEmail: true,
+            },
+        });
+        const inviteTargets = (
+            await Promise.all(
+                recipients
+                    .filter((p) => p.notifyOnFinalize === 1 && !!p.notificationEmail)
+                    .map(async (p) => ({
+                        name: (await decryptPii(p.name)) ?? "",
+                        email: (await decryptPii(p.notificationEmail)) ?? "",
+                    }))
+            )
+        ).filter((t) => t.email.length > 0);
+
+        const dedupedAttendees = Array.from(
+            new Map(inviteTargets.map((target) => [target.email, target])).values()
+        );
+
+        const insertRes = await fetch(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all",
+            {
+                method: "POST",
+                headers: {
+                    Authorization: `Bearer ${googleSession.accessToken}`,
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    summary: `${currentEvent.title}（確定）`,
+                    description: currentEvent.description ?? "調整くんで確定した日程です。",
+                    ...(candidateWindow.allDay
+                        ? {
+                              start: { date: candidateWindow.startDate },
+                              end: { date: candidateWindow.endDateExclusive },
+                          }
+                        : {
+                              start: {
+                                  dateTime: candidateWindow.startDateTime,
+                                  timeZone: "Asia/Tokyo",
+                              },
+                              end: {
+                                  dateTime: candidateWindow.endDateTime,
+                                  timeZone: "Asia/Tokyo",
+                              },
+                          }),
+                    attendees: dedupedAttendees.map((target) => ({
+                        email: target.email,
+                        displayName: target.name,
+                    })),
+                }),
+                signal: AbortSignal.timeout(15_000),
+            }
+        );
+
+        if (!insertRes.ok) {
+            const errText = await insertRes.text();
+            console.error("[GoogleInvite:error]", redactPii(errText));
+            return c.json({ error: "Failed to add to Google Calendar" }, 500);
+        }
+
+        return c.json({ ok: true });
+    }
+);

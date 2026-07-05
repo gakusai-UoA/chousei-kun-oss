@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Google Calendar Sync</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #4285f4;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #202124;
+            --secondary-text: #5f6368;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 90%;
+            max-width: 500px;
+            background: var(--card-bg);
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            text-align: center;
+        }
+
+        h1 {
+            font-weight: 600;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .btn {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(66, 133, 244, 0.3);
+        }
+
+        .btn:hover {
+            background-color: #3367d6;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(66, 133, 244, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        #loading {
+            display: none;
+            margin-top: 1rem;
+            color: var(--secondary-text);
+        }
+
+        #results {
+            margin-top: 2rem;
+            text-align: left;
+        }
+
+        .event-card {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            animation: fadeIn 0.4s ease forwards;
+        }
+
+        .event-card:last-child {
+            border-bottom: none;
+        }
+
+        .event-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .event-time {
+            font-size: 0.85rem;
+            color: var(--secondary-text);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Google Calendar Sync</h1>
+        <p style="color: var(--secondary-text); margin-bottom: 2rem;">
+            ボタンを押して、あなたのご利用のアカウントから直近の予定を取得します。
+        </p>
+
+        <button id="fetchBtn" class="btn" onclick="fetchEvents()">予定を取得する</button>
+        <div id="loading">取得中...</div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        function fetchEvents() {
+            const btn = document.getElementById('fetchBtn');
+            const loader = document.getElementById('loading');
+            const resultsDiv = document.getElementById('results');
+
+            btn.disabled = true;
+            loader.style.display = 'block';
+            resultsDiv.innerHTML = '';
+
+            google.script.run
+                .withSuccessHandler((data) => {
+                    btn.disabled = false;
+                    loader.style.display = 'none';
+
+                    if (data.events.length === 0) {
+                        resultsDiv.innerHTML = '<p style="text-align: center; color: var(--secondary-text);">予定が見つかりませんでした。</p>';
+                    } else {
+                        // Send back to the opener if exists
+                        if (window.opener) {
+                            window.opener.postMessage({ type: 'GOOGLE_CALENDAR_EVENTS', data: data }, '*');
+                            resultsDiv.innerHTML = '<p style="text-align: center; color: var(--primary-color);"><b>データを送信しました。このウィンドウを閉じても大丈夫です。</b></p>';
+                        }
+
+                        // 表示はシンプルに10件まで
+                        data.events.slice(0, 10).forEach(event => {
+                            const card = document.createElement('div');
+                            card.className = 'event-card';
+                            card.innerHTML = `
+                <div class="event-title">${event.title}</div>
+                <div class="event-time">${event.start} 〜 ${event.end}</div>
+                ${event.location ? `<div class="event-time">📍 ${event.location}</div>` : ''}
+              `;
+                            resultsDiv.appendChild(card);
+                        });
+                    }
+                })
+                .withFailureHandler((err) => {
+                    btn.disabled = false;
+                    loader.style.display = 'none';
+                    resultsDiv.innerHTML = `<p style="color: #d93025; text-align: center;">エラー: ${err.message}</p>`;
+                })
+                .getCalendarData();
+        }
+    </script>
+</body>
+
+</html>
