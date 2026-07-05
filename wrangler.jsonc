@@ -1,0 +1,111 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "chosei-kun",
+	// OpenNext がビルドした `.open-next/worker.js` をラップし、Cron Trigger 用の
+	// scheduled ハンドラを追加するエントリポイント。
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2025-12-01",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".open-next/assets"
+	},
+	"images": {
+		// Enable image optimization
+		// see https://opennext.js.org/cloudflare/howtos/image
+		"binding": "IMAGES"
+	},
+	"services": [
+		{
+			// Self-reference service binding, the service name must match the worker name
+			// see https://opennext.js.org/cloudflare/caching
+			"binding": "WORKER_SELF_REFERENCE",
+			"service": "chosei-kun"
+		}
+	],
+	"observability": {
+		"enabled": true
+	},
+	/**
+	 * Cron Triggers (Office Hour の主催者カレンダーを 15 分毎に同期)
+	 * https://developers.cloudflare.com/workers/configuration/cron-triggers/
+	 */
+	"triggers": {
+		"crons": ["*/15 * * * *"]
+	},
+	"keep_names": false,
+	/**
+	 * Smart Placement
+	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+	 */
+	// "placement": {  "mode": "smart" }
+	/**
+	 * Bindings
+	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+	 * databases, object storage, AI inference, real-time communication and more.
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "chosei-kun-db",
+			"database_id": "e4f8dd7e-b022-4f35-8b76-708754d56ab1"
+		}
+		// NOTE: 未使用の remote バインディング "n" を無効化。
+		// "remote": true があると `next dev` 起動時に initOpenNextCloudflareForDev() が
+		// Cloudflare アカウントへリモートプレビューセッションを張ろうとして失敗する。
+		// コードは "DB" バインディングのみ使用するため不要。
+		// {
+		// 	"binding": "n",
+		// 	"database_name": "chosei-kun-db",
+		// 	"database_id": "e4f8dd7e-b022-4f35-8b76-708754d56ab1",
+		// 	"remote": true
+		// }
+	],
+	/**
+	 * Rate Limiting bindings
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
+	 * period must be 10 or 60 (seconds). namespace_id must be unique per limiter.
+	 */
+	"ratelimits": [
+		{
+			// 管理者パスワード認証の総当たり対策（イベント+IP単位）: 60秒あたり10回
+			"name": "AUTH_RATE_LIMITER",
+			"namespace_id": "1002",
+			"simple": { "limit": 10, "period": 60 }
+		},
+		{
+			// 一般書き込み（参加回答・予約）の連投対策: 60秒あたり30回
+			"name": "WRITE_RATE_LIMITER",
+			"namespace_id": "1003",
+			"simple": { "limit": 30, "period": 60 }
+		}
+	],
+	/**
+	 * Flagship (Feature Flags)
+	 * メンテナンスモード切替フラグ `maintenance-mode`（ブール）を再デプロイ無しで
+	 * 即時 ON/OFF するために使用。app_id は Cloudflare ダッシュボードの
+	 * Compute > Flagship で作成したアプリの ID に置き換えること。
+	 * https://developers.cloudflare.com/flagship/
+	 */
+	"flagship": [
+		{
+			"binding": "FLAGS",
+			"app_id": "39204472-aff7-4fee-a243-a5b0e027cbb9"
+		}
+	],
+	/**
+	 * Environment Variables
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+	 * Note: Use secrets to store sensitive data.
+	 * https://developers.cloudflare.com/workers/configuration/secrets/
+	 */
+	// "vars": {  "MY_VARIABLE": "production_value" }
+}
