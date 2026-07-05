@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { siteConfig } from "@/config/site";
-import { Calendar, Users, CheckCircle, ArrowRight, Sparkles, Clock } from "lucide-react";
+import { Calendar, Users, CheckCircle, ArrowRight, Sparkles } from "lucide-react";
 import type { Metadata } from "next";
 import { budouxify } from "@/lib/budoux";
 

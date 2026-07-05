@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CUSTOM_PERIODS, HOURLY_SLOTS } from "./PeriodSelector";
@@ -11,10 +10,9 @@ import { DailyAvailabilityList } from "@/components/DailyAvailabilityList";
 import { isAllDayEvent as areAllDayCandidates, isAllDayCandidate, parseDateOnly } from "@/lib/candidates";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
-import { cn } from "@/lib/utils";
-import { Check, X, Triangle, Circle, Loader2, Calendar as CalendarIcon } from "lucide-react";
+import { X, Triangle, Circle, Loader2 } from "lucide-react";
 import { siteConfig } from "@/config/site";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import dynamic from "next/dynamic";
 import { useUser } from "@/hooks/useUser";
 import { logActivity } from "@/hooks/useActivityLog";
@@ -29,6 +27,25 @@ interface ResponseFormProps {
   onSuccess: () => Promise<void>;
 }
 
+/** Google/大学カレンダー/iCal から取り込んだ、生の予定データの緩い共通形 */
+interface RawImportedEvent {
+  dtstart?: string;
+  start?: string;
+  dtend?: string;
+  end?: string;
+  summary?: string;
+  allDay?: boolean;
+  sourceUrl?: string;
+  icalUrl?: string;
+  calendarUrl?: string;
+  calendarId?: string;
+  source?: string;
+  description?: string;
+  htmlLink?: string;
+}
+
+const EXCLUDED_ICAL_URLS = ["https://csweb.u-aizu.ac.jp/calendar/AcademicCalendar-student-E.ics", "https://csweb.u-aizu.ac.jp/calendar/AcademicCalendar-student-J.ics"];
+
 export function ResponseForm({ eventId, candidates, participants, allAvailabilities, onSuccess }: ResponseFormProps) {
   const router = useRouter();
   // 「日毎の出欠確認」イベント（全候補が終日形式）かどうか
@@ -39,7 +56,7 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
   const [notifyOnFinalize, setNotifyOnFinalize] = React.useState(false);
   const [notificationEmail, setNotificationEmail] = React.useState("");
   const [showAllDayDialog, setShowAllDayDialog] = React.useState(false);
-  const [pendingGoogleEvents, setPendingGoogleEvents] = React.useState<any[]>([]);
+  const [pendingGoogleEvents, setPendingGoogleEvents] = React.useState<RawImportedEvent[]>([]);
   const [pendingAllDayDates, setPendingAllDayDates] = React.useState<string[]>([]);
   const [availabilities, setAvailabilities] = React.useState<number[]>(
     new Array(candidates.length).fill(2), // Default to 'O'
@@ -59,15 +76,14 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
   });
 
   const closeFeedback = () => setFeedback((prev) => ({ ...prev, isOpen: false }));
-  const EXCLUDED_ICAL_URLS = ["https://csweb.u-aizu.ac.jp/calendar/AcademicCalendar-student-E.ics", "https://csweb.u-aizu.ac.jp/calendar/AcademicCalendar-student-J.ics"];
 
-  const isExcludedCalendarEvent = React.useCallback((event: any) => {
-    const fieldsToCheck = [event?.sourceUrl, event?.icalUrl, event?.calendarUrl, event?.calendarId, event?.source, event?.description, event?.htmlLink].filter(Boolean).map((v: string) => String(v));
+  const isExcludedCalendarEvent = React.useCallback((event: RawImportedEvent) => {
+    const fieldsToCheck = [event?.sourceUrl, event?.icalUrl, event?.calendarUrl, event?.calendarId, event?.source, event?.description, event?.htmlLink].filter(Boolean).map((v) => String(v));
 
     return EXCLUDED_ICAL_URLS.some((url) => fieldsToCheck.some((value) => value.includes(url)));
   }, []);
 
-  const isAllDayEvent = React.useCallback((event: any) => {
+  const isAllDayEvent = React.useCallback((event: RawImportedEvent) => {
     if (event?.allDay === true) return true;
     const startRaw = event?.dtstart ?? event?.start;
     const endRaw = event?.dtend ?? event?.end;
@@ -93,19 +109,19 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
       // 終日候補: 時間帯を持たない（時間ベースの重複判定はスキップされる）
       return { date, period: null };
     } else if (type === "P") {
-      period = CUSTOM_PERIODS.find((p: any) => p.id === id);
+      period = CUSTOM_PERIODS.find((p) => p.id === id);
     } else if (type === "H") {
       period = HOURLY_SLOTS.find((h) => h.id === id);
     } else {
       const pid = parseInt(slotId);
-      period = CUSTOM_PERIODS.find((p: any) => p.id === pid);
+      period = CUSTOM_PERIODS.find((p) => p.id === pid);
     }
 
     return { date, period };
   }, []);
 
   const applyGoogleConflicts = React.useCallback(
-    (events: any[], applyAllDay: boolean, detectedEmail?: string) => {
+    (events: RawImportedEvent[], applyAllDay: boolean) => {
       setAvailabilities((prevAvailabilities) => {
         const nextAvailabilities = [...prevAvailabilities];
         let conflictCount = 0;
@@ -131,7 +147,7 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
           const candidateDay = new Date(cDate);
           candidateDay.setHours(0, 0, 0, 0);
 
-          const hasConflict = events.some((ev: any) => {
+          const hasConflict = events.some((ev) => {
             if (isAllDayEvent(ev)) {
               if (!applyAllDay) return false;
               const startRaw = ev.dtstart ?? ev.start;
@@ -149,8 +165,8 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
             }
 
             if (!cStart || !cEnd) return false;
-            const eStart = new Date(ev.dtstart || ev.start);
-            const eEnd = new Date(ev.dtend || ev.end);
+            const eStart = new Date(ev.dtstart || ev.start || "");
+            const eEnd = new Date(ev.dtend || ev.end || "");
             return cStart < eEnd && cEnd > eStart;
           });
 
@@ -169,11 +185,11 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
         return nextAvailabilities;
       });
     },
-    [candidates, parseCandidateForConflict, isAllDayEvent, parseDateOnly],
+    [candidates, parseCandidateForConflict, isAllDayEvent],
   );
 
   const hasAllDayOverlapWithCandidates = React.useCallback(
-    (event: any) => {
+    (event: RawImportedEvent) => {
       const startRaw = event?.dtstart ?? event?.start;
       const endRaw = event?.dtend ?? event?.end;
       const startDay = parseDateOnly(startRaw);
@@ -191,7 +207,7 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
         return candidateDay >= startDay && candidateDay < endDay;
       });
     },
-    [candidates, parseCandidateForConflict, parseDateOnly],
+    [candidates, parseCandidateForConflict],
   );
 
   // Calculate aggregated OK counts for each candidate slot
@@ -275,13 +291,13 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
     const id = parseInt(slotId.substring(1));
 
     if (type === "P") {
-      period = CUSTOM_PERIODS.find((p: any) => p.id === id);
+      period = CUSTOM_PERIODS.find((p) => p.id === id);
     } else if (type === "H") {
       period = HOURLY_SLOTS.find((h) => h.id === id);
     } else {
       // Fallback for old data (assuming it was a period ID directly)
       const pid = parseInt(slotId);
-      period = CUSTOM_PERIODS.find((p: any) => p.id === pid);
+      period = CUSTOM_PERIODS.find((p) => p.id === pid);
     }
 
     return { date, period };
@@ -289,51 +305,6 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
 
   // source: 終日モードで「この日を×にした予定」を由来のカレンダーごとに表示するためのラベル
   const [busyEvents, setBusyEvents] = React.useState<{ start: string; end: string; summary: string; source: string; allDay: boolean }[]>([]);
-
-  const mapEventsToPeriods = React.useCallback((events: any[]) => {
-    const newBusyPeriods: string[] = [];
-
-    events.forEach((event) => {
-      const startDate = new Date(event.dtstart || event.start);
-      const endDate = new Date(event.dtend || event.end);
-      const dateStr = startDate.toISOString().split("T")[0];
-
-      const checkOverlap = (startA: Date, endA: Date, startB: Date, endB: Date) => {
-        return startA < endB && endA > startB;
-      };
-
-      CUSTOM_PERIODS.forEach((p: any) => {
-        const [startH, startM] = p.time.split("-")[0].split(":").map(Number);
-        const [endH, endM] = p.time.split("-")[1].split(":").map(Number);
-
-        const pStart = new Date(startDate);
-        pStart.setHours(startH, startM, 0, 0);
-        const pEnd = new Date(startDate);
-        pEnd.setHours(endH, endM, 0, 0);
-
-        if (checkOverlap(startDate, endDate, pStart, pEnd)) {
-          newBusyPeriods.push(`${dateStr}_P${p.id}`);
-        }
-      });
-
-      HOURLY_SLOTS.forEach((h) => {
-        const [startH] = h.time.split("-")[0].split(":").map(Number);
-        const pStart = new Date(startDate);
-        pStart.setHours(startH, 0, 0, 0);
-        const pEnd = new Date(startDate);
-        pEnd.setHours(startH + 1, 0, 0, 0);
-
-        if (checkOverlap(startDate, endDate, pStart, pEnd)) {
-          newBusyPeriods.push(`${dateStr}_H${h.id}`);
-        }
-      });
-    });
-    return [...new Set(newBusyPeriods)];
-  }, []);
-
-  const busyPeriodIds = React.useMemo(() => {
-    return mapEventsToPeriods(busyEvents);
-  }, [busyEvents, mapEventsToPeriods]);
 
   const handleCampusSquareImport = async (uid: string, pass: string) => {
     if (!ENABLE_CAMPUS_SQUARE) return;
@@ -373,10 +344,10 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
 
       const data = (await res.json()) as { events: { dtstart: string; dtend: string; summary?: string; allDay?: boolean }[] };
       applyImportedEvents(data.events, "iCal");
-    } catch (e: any) {
+    } catch (e) {
       setFeedback({
         title: "エラー",
-        message: e.message || "インポートに失敗しました",
+        message: e instanceof Error ? e.message : "インポートに失敗しました",
         isOpen: true,
       });
     } finally {
@@ -494,15 +465,15 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
 
       const googleData = (await res.json()) as {
         email?: string;
-        events: any[];
+        events: RawImportedEvent[];
       };
-      const events = (googleData.events || []).filter((ev: any) => !isExcludedCalendarEvent(ev));
+      const events = (googleData.events || []).filter((ev) => !isExcludedCalendarEvent(ev));
       const detectedEmail = googleData.email || "";
 
       // Populate busy events for display
       const newEvents = events.map(ev => ({
-          start: ev.dtstart,
-          end: ev.dtend,
+          start: ev.dtstart || ev.start || "",
+          end: ev.dtend || ev.end || "",
           summary: ev.summary || "予定あり",
           source: "Googleカレンダー",
           allDay: !!ev.allDay,
@@ -523,16 +494,16 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
         setNotifyOnFinalize(true);
       }
 
-      const allDayEvents = events.filter((ev: any) => isAllDayEvent(ev) && hasAllDayOverlapWithCandidates(ev));
+      const allDayEvents = events.filter((ev) => isAllDayEvent(ev) && hasAllDayOverlapWithCandidates(ev));
       if (allDayEvents.length > 0) {
-        const allDayDates = Array.from(new Set(allDayEvents.map((ev: any) => String(ev.dtstart || ev.start))));
+        const allDayDates = Array.from(new Set(allDayEvents.map((ev) => String(ev.dtstart || ev.start))));
         setPendingGoogleEvents(events);
         setPendingAllDayDates(allDayDates as string[]);
         setShowAllDayDialog(true);
         return;
       }
 
-      applyGoogleConflicts(events, false, detectedEmail);
+      applyGoogleConflicts(events, false);
     } finally {
       setIsGoogleImporting(false);
     }
@@ -543,9 +514,13 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
     if (url.searchParams.get("googleOAuth") !== "1") return;
 
     handleGoogleImport().finally(() => {
+      // eslint-disable-next-line drizzle/enforce-delete-with-where -- URLSearchParams.delete(), not a DB query
       url.searchParams.delete("googleOAuth");
       window.history.replaceState({}, "", `${url.pathname}${url.search}`);
     });
+    // handleGoogleImport intentionally excluded: this must run once on mount only,
+    // to consume the OAuth-return query param exactly once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleStatusChange = (idx: number, status: number) => {
@@ -554,19 +529,6 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
       next[idx] = status;
       return next;
     });
-  };
-
-  const getStatusIcon = (status: number) => {
-    switch (status) {
-      case 0:
-        return <X className="w-6 h-6 text-red-500" />;
-      case 1:
-        return <Triangle className="w-6 h-6 text-yellow-500" />;
-      case 2:
-        return <Circle className="w-6 h-6 text-green-500" />;
-      default:
-        return null;
-    }
   };
 
   const handleSubmit = async () => {
@@ -633,7 +595,7 @@ export function ResponseForm({ eventId, candidates, participants, allAvailabilit
       } else {
         router.push(`/${eventId}/complete`);
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       setFeedback({
         title: "エラー",

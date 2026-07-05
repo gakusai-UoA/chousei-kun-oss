@@ -11,6 +11,9 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+	{
+		ignores: [".next/**", ".open-next/**", "cloudflare-env.d.ts"],
+	},
 	...compat.extends("next/core-web-vitals", "next/typescript"),
 	{
 		plugins: {
@@ -19,6 +22,10 @@ const eslintConfig = [
 		rules: {
 			"drizzle/enforce-delete-with-where": "error",
 			"drizzle/enforce-update-with-where": "error",
+			"@typescript-eslint/no-unused-vars": [
+				"warn",
+				{ argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+			],
 		},
 	},
 ];

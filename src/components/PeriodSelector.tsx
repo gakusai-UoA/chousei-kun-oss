@@ -7,7 +7,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Check, X, Copy, ZoomIn, ZoomOut, AlertTriangle, Info, RotateCcw, Pencil, MousePointerClick } from "lucide-react";
+import { X, Copy, ZoomIn, ZoomOut, AlertTriangle, Info, RotateCcw, Pencil, MousePointerClick } from "lucide-react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 
@@ -198,7 +198,7 @@ export function PeriodSelector({
 
         if (sourceSelections.length === 0) return;
 
-        let newSelected = [...selectedPeriods];
+        const newSelected = [...selectedPeriods];
         viewDates.forEach(date => {
             const targetDateStr = format(date, "yyyy-MM-dd");
             if (targetDateStr === sourceDateStr) return;

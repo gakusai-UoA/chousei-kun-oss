@@ -1,10 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { CUSTOM_PERIODS, HOURLY_SLOTS } from "@/components/PeriodSelector";
 import { cn } from "@/lib/utils";
-import { Check, X, Triangle, Circle } from "lucide-react";
+import { X, Triangle, Circle } from "lucide-react";
 import { budouxify } from "@/lib/budoux";
 
 interface Event {

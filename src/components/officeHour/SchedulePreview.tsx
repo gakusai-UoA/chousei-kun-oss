@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Calendar as CalendarIcon, GraduationCap, Loader2, AlertCircle, ChevronLeft, ChevronRight, Eye } from "lucide-react";
+import { Calendar as CalendarIcon, GraduationCap, Loader2, ChevronLeft, ChevronRight, Eye } from "lucide-react";
 import { formatTime, formatDateLabel, formatIsoDate, jstDayStartMs } from "@/lib/officeHour";
 import { cn } from "@/lib/utils";
 
@@ -216,7 +216,7 @@ export function SchedulePreview({
         [events]
     );
 
-    const { timelineStartHour, timelineEndHour, timelineHours } = React.useMemo(() => {
+    const { timelineStartHour, timelineHours } = React.useMemo(() => {
         let minH = DEFAULT_START_HOUR;
         let maxH = DEFAULT_END_HOUR;
         for (const w of windows) {

@@ -760,6 +760,7 @@ function CopyMenu({
     const toggle = (idx: number) => {
         setSelected((prev) => {
             const next = new Set(prev);
+            // eslint-disable-next-line drizzle/enforce-delete-with-where -- Set.delete(), not a DB query
             if (next.has(idx)) next.delete(idx);
             else next.add(idx);
             return next;

@@ -16,7 +16,7 @@ type Props = {
 type CalendarPreference = "google" | "ical-event" | "ical-all" | "none";
 
 export function ResponseCompleteForm({ eventId, eventTitle }: Props) {
-    const { userInfo, isLoading: isUserLoading, regenerateCalendarToken, getCalendarUrl } = useUser();
+    const { isLoading: isUserLoading, regenerateCalendarToken, getCalendarUrl } = useUser();
     const [participantId, setParticipantId] = useState<string | null>(null);
     const [notificationEmail, setNotificationEmail] = useState("");
     const [calendarPreference, setCalendarPreference] = useState<CalendarPreference>("none");
@@ -74,6 +74,9 @@ export function ResponseCompleteForm({ eventId, eventTitle }: Props) {
             }
         };
         checkGoogleSession();
+        // notificationEmail intentionally excluded: this must run once on mount only.
+        // Including it would refire this fetch on every keystroke in the email field.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const handleSave = async () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 import { captureException } from "@/lib/wana";
 
 /**
@@ -38,7 +39,7 @@ export default function Error({
                 >
                     再試行
                 </button>
-                <a
+                <Link
                     href="/"
                     style={{
                         padding: "0.5rem 1.25rem",
@@ -49,7 +50,7 @@ export default function Error({
                     }}
                 >
                     ホームに戻る
-                </a>
+                </Link>
             </div>
         </div>
     );

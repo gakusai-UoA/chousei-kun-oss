@@ -6,11 +6,10 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
-    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog";
-import { Calendar, Download, Loader2, X } from "lucide-react";
+import { Download, Loader2, X } from "lucide-react";
 import { generateICalEvent, parseCandidateToDateTime, downloadICalFile } from "@/lib/ical";
 import { formatAllDayCandidateLabelLong } from "@/lib/candidates";
 import { format } from "date-fns";

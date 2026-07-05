@@ -375,6 +375,7 @@ eventsRoutes.post(
  * D1 batch で参加者・回答・本体を一括削除する。GDPR 的な「忘れられる権利」の
  * ためにも、admin 認証済みの本人が即時に削除できる手段を残しておく。
  */
+// eslint-disable-next-line drizzle/enforce-delete-with-where -- Hono route registration (.delete = HTTP method), not a DB query
 eventsRoutes.delete(
     "/:id",
     sValidator("param", eventIdParamSchema),

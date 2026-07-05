@@ -39,6 +39,7 @@ export default function GlobalError({
                     >
                         再試行
                     </button>
+                    {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- intentional plain <a>: this replaces the crashed root layout, so it must not depend on router/Link machinery that may itself be broken */}
                     <a
                         href="/"
                         style={{
