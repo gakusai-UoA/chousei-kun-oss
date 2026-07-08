@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { CUSTOM_PERIODS, type CustomPeriod } from "@/config/periods";
-import { Calendar, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface CustomPeriodsGridProps {

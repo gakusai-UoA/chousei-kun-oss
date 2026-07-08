@@ -8,6 +8,7 @@
  * `.open-next/worker.js` を生成するので、デプロイ手順は変わらない（このファイルから
  * import するだけ）。
  */
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- @ts-expect-error would break once .open-next/worker.js exists locally (post-build); this import only errors on a fresh, unbuilt checkout
 // @ts-ignore: generated file
 import openNextWorker from "./.open-next/worker.js";
 import { syncAllActive } from "./src/server/cron/sync-host-busy";
@@ -15,6 +16,7 @@ import { syncAllActive } from "./src/server/cron/sync-host-busy";
 // Durable Object クラス類は OpenNext が同 worker から re-export している前提なので
 // type 抽出 + 再エクスポートが必要。OpenNext のテンプレ通り、wrangler の bundling 時に
 // `.open-next/worker.js` 側の export を引き継ぐ。
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- see note above
 // @ts-ignore: generated file
 export { DOQueueHandler, DOShardedTagCache, BucketCachePurge } from "./.open-next/worker.js";
 
@@ -23,7 +25,7 @@ type Env = {
 };
 
 
-export default {
+const worker = {
     fetch: openNextWorker.fetch,
 
     /**
@@ -43,3 +45,5 @@ export default {
         );
     },
 };
+
+export default worker;

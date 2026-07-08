@@ -49,10 +49,11 @@ usersRoutes.get("/:userId", async (c) => {
 
 usersRoutes.post(
     "/:userId/regenerate-token",
+    sValidator("param", regenerateTokenSchema),
     async (c) => {
         const db = createDb(c.env.DB);
         const userService = createUserService(db);
-        const userId = c.req.param("userId");
+        const { userId } = c.req.valid("param");
 
         const user = await userService.findById(userId);
         if (!user) {

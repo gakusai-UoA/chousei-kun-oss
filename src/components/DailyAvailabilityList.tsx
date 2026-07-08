@@ -4,7 +4,6 @@ import { memo, useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { X, Triangle, Circle, CalendarClock, CalendarDays, List, CircleAlert } from "lucide-react";
 import { format } from "date-fns";
-import { ja } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { formatAllDayCandidateLabel, parseCandidateDate, allDayEventDateRange } from "@/lib/candidates";
 
@@ -486,7 +485,6 @@ export const DailyAvailabilityList = memo(function DailyAvailabilityList({
                     const dateStr = candidate.split("_")[0];
                     const status = availabilities[idx];
                     const busyInfo = busyByDate.get(dateStr) ?? { causing: [], other: [] };
-                    const isWeekend = date ? date.getDay() === 0 || date.getDay() === 6 : false;
                     const isConfirmed = confirmedCandidateIdx === idx;
                     const isRecommended =
                         (mode === "admin" || mode === "results") &&

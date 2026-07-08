@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
@@ -10,7 +9,7 @@ import { AllDayRangeSelector } from "@/components/AllDayRangeSelector";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { isAllDayEvent } from "@/lib/candidates";
-import { Loader2, Calendar as CalendarIcon, Check, Copy, ExternalLink, ArrowRight, X as XIcon } from "lucide-react";
+import { Loader2, Check, Copy, ExternalLink, ArrowRight, X as XIcon } from "lucide-react";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
 import Link from "next/link";
@@ -26,7 +25,6 @@ import {
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
 } from "@/components/ui/dialog";
 
 import dynamic from 'next/dynamic';
@@ -127,7 +125,6 @@ function UrlShareCard({
 }
 
 export function EventForm() {
-    const router = useRouter();
     const [isModalOpen, setIsModalOpen] = React.useState(false);
     const [title, setTitle] = React.useState("");
     const [description, setDescription] = React.useState("");
@@ -283,11 +280,11 @@ export function EventForm() {
                 throw new Error(error.error || "インポートに失敗しました");
             }
 
-            const data = await res.json() as { events: { dtstart: string, dtend: string }[] };
+            const data = await res.json() as { events: { dtstart: string, dtend: string, summary?: string }[] };
             const newEvents = data.events.map(ev => ({
                 start: ev.dtstart,
                 end: ev.dtend,
-                summary: (ev as any).summary || "予定あり"
+                summary: ev.summary || "予定あり"
             }));
 
             setUniversityBusyEvents(prev => {
@@ -304,10 +301,10 @@ export function EventForm() {
                 message: `${data.events.length}件の予定をインポートしました。これらは赤色で表示されます。`,
                 isOpen: true
             });
-        } catch (error: any) {
+        } catch (error) {
             setFeedback({
                 title: "エラー",
-                message: error.message || "インポートに失敗しました",
+                message: error instanceof Error ? error.message : "インポートに失敗しました",
                 isOpen: true
             });
         }
@@ -365,13 +362,14 @@ export function EventForm() {
         } finally {
             setIsGoogleImporting(false);
         }
-    }, [mapEventsToPeriods]);
+    }, []);
 
     React.useEffect(() => {
         const url = new URL(window.location.href);
         if (url.searchParams.get("googleOAuth") !== "1") return;
 
         handleGoogleImport().finally(() => {
+            // eslint-disable-next-line drizzle/enforce-delete-with-where -- URLSearchParams.delete(), not a DB query
             url.searchParams.delete("googleOAuth");
             window.history.replaceState({}, "", `${url.pathname}${url.search}`);
         });

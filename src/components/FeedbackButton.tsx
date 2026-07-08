@@ -12,7 +12,7 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { HelpCircle, Send, Trash2, Mail, Copy, Check, ChevronDown, ChevronUp } from "lucide-react";
+import { HelpCircle, Trash2, Mail, Copy, Check, ChevronDown, ChevronUp } from "lucide-react";
 import { getActivityLogs, clearActivityLogs, formatLogsForEmail } from "@/hooks/useActivityLog";
 import { budouxify } from "@/lib/budoux";
 

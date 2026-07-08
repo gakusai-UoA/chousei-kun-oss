@@ -175,7 +175,7 @@ export class CampusSquareService {
             return { events: this.parseICS(icsText), icalUrl: calendarUrl };
 
         } catch (error) {
-            console.error('[CampusSquareService] Error:', error);
+            console.error('[CampusSquareService] Error (lastSid:', lastSid, '):', error);
             throw error;
         }
     }

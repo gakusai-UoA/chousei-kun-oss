@@ -348,6 +348,7 @@ officeHoursRoutes.post(
 );
 
 /** 管理者: Office Hour を論理削除。 */
+// eslint-disable-next-line drizzle/enforce-delete-with-where -- Hono route registration (.delete = HTTP method), not a DB query
 officeHoursRoutes.delete(
     "/:id",
     sValidator("param", officeHourIdParamSchema),
