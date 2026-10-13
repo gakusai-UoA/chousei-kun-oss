@@ -6,18 +6,13 @@ import { createDb, type DbClient } from "@/server/db/client";
 import { events, participants } from "@/server/db/schema";
 import { createPasswordHash, verifyPassword } from "@/lib/admin-auth";
 import { encryptPii } from "@/lib/pii-crypto";
-import { isAllDayEvent } from "@/lib/candidates";
+import { formatCandidateLabel, isAllDayEvent } from "@/lib/candidates";
 import { safeJsonParse } from "@/lib/safe-json";
-import { siteConfig } from "@/config/site";
 import { createEventSchema, participateSchema, confirmCandidateSchema } from "@/server/api/schemas";
 import { replaceAvailabilities } from "@/server/api/routes/events";
 import type { EventService } from "@/server/services/event.service";
 import { createEventService, createUserService } from "@/server/services";
 import { enforceRateLimit, type RateLimitBinding } from "@/server/api/rate-limit";
-
-function eventUrl(id: string): string {
-    return `${siteConfig.url}/${id}`;
-}
 
 function errorResult(text: string) {
     return { content: [{ type: "text" as const, text }], isError: true as const };
@@ -30,7 +25,7 @@ function jsonResult(data: unknown) {
 const TOO_MANY_ATTEMPTS = "試行回数が多すぎます。しばらくしてから再度お試しください。";
 
 /** worker.ts が ctx.props 経由で渡す、セッション開始時の接続元情報。 */
-export type McpProps = { ip?: string };
+export type McpProps = { ip?: string; origin?: string };
 
 /**
  * 管理者操作用のパスワード検証。ブラウザの admin セッション Cookie に相当するものが
@@ -77,6 +72,16 @@ export class ChouseiMcpAgent extends McpAgent<Cloudflare.Env, State, McpProps> {
         return this.props?.ip ?? "unknown";
     }
 
+    /**
+     * イベントの URL。接続元の origin（worker.ts が props に載せる）から組み立てる。
+     * origin が無い場合は URL を返さない。プレースホルダのドメインを返すと、
+     * エージェントがそれをそのまま利用者に提示してしまう。
+     */
+    private eventUrl(id: string): string | undefined {
+        const origin = this.props?.origin;
+        return origin ? `${origin}/${id}` : undefined;
+    }
+
     private verifyAdmin(db: DbClient, eventId: string, password: string) {
         return verifyAdminPassword(db, this.env.AUTH_RATE_LIMITER, this.clientIp, eventId, password);
     }
@@ -107,7 +112,7 @@ export class ChouseiMcpAgent extends McpAgent<Cloudflare.Env, State, McpProps> {
                     createdByUserId: creatorUserId ?? null,
                 });
 
-                return jsonResult({ id, url: eventUrl(id) });
+                return jsonResult({ id, url: this.eventUrl(id) });
             }
         );
 
@@ -134,7 +139,7 @@ export class ChouseiMcpAgent extends McpAgent<Cloudflare.Env, State, McpProps> {
 
                 const items = rows
                     .sort((a, b) => b.createdAt - a.createdAt)
-                    .map((row) => ({ ...row, url: eventUrl(row.id) }));
+                    .map((row) => ({ ...row, url: this.eventUrl(row.id) }));
 
                 return jsonResult({ items });
             }
@@ -145,7 +150,8 @@ export class ChouseiMcpAgent extends McpAgent<Cloudflare.Env, State, McpProps> {
             {
                 title: "イベントの詳細・回答状況を取得する",
                 description:
-                    "イベント ID からタイトル・候補日程・確定日程を取得する。回答結果（参加者ごとの出欠）は " +
+                    "イベント ID からタイトル・候補日程・確定日程を取得する。candidateLabels は candidates と同じ順の " +
+                    "曜日付き表示名（例: 10/13(火) 1限）で、利用者に日程を示すときはこちらを使う。回答結果（参加者ごとの出欠）は " +
                     "resultsVisibleToAll が true の場合のみ含まれる。false の場合は adminPassword を渡すと閲覧できる。",
                 inputSchema: {
                     eventId: z.string().uuid(),
@@ -175,13 +181,15 @@ export class ChouseiMcpAgent extends McpAgent<Cloudflare.Env, State, McpProps> {
                     isAdmin = auth.ok;
                 }
 
+                const candidates = safeJsonParse<string[]>(event.candidates, "events.candidates") ?? [];
                 const base = {
                     id: event.id,
                     title: event.title,
                     description: event.description,
-                    candidates: safeJsonParse<string[]>(event.candidates, "events.candidates") ?? [],
+                    candidates,
+                    candidateLabels: candidates.map(formatCandidateLabel),
                     confirmedCandidateIdx: event.confirmedCandidateIdx,
-                    url: eventUrl(event.id),
+                    url: this.eventUrl(event.id),
                 };
 
                 if (event.resultsVisibleToAll === 0 && !isAdmin) {
@@ -268,7 +276,7 @@ export class ChouseiMcpAgent extends McpAgent<Cloudflare.Env, State, McpProps> {
 
                 await replaceAvailabilities(this.env.DB, newParticipantId, statuses);
 
-                return jsonResult({ success: true, participantId: newParticipantId, url: eventUrl(eventId) });
+                return jsonResult({ success: true, participantId: newParticipantId, url: this.eventUrl(eventId) });
             }
         );
 
@@ -345,7 +353,7 @@ export class ChouseiMcpAgent extends McpAgent<Cloudflare.Env, State, McpProps> {
                     resultsVisibleToAll: src.resultsVisibleToAll,
                 });
 
-                return jsonResult({ id: newId, url: eventUrl(newId) });
+                return jsonResult({ id: newId, url: this.eventUrl(newId) });
             }
         );
 
@@ -383,7 +391,7 @@ export class ChouseiMcpAgent extends McpAgent<Cloudflare.Env, State, McpProps> {
                 };
                 const escapeCsv = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
 
-                const header = ["名前", "メール", "コメント", ...candidates.map((_, i) => `候補${i + 1}`)];
+                const header = ["名前", "メール", "コメント", ...candidates.map(formatCandidateLabel)];
                 const lines = [header.map(escapeCsv).join(",")];
                 for (const p of participants) {
                     const cols = [
